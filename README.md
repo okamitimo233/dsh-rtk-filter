@@ -141,3 +141,7 @@ Unit tests use only Node built-ins and a fake `rtk` script:
 ```bash
 node --test test/*.test.mjs
 ```
+
+## Handoff
+
+See [HANDOFF.md](HANDOFF.md) for the implementation history, operational notes, verification record, and known pitfalls.
