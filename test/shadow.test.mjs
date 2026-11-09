@@ -10,7 +10,12 @@ afterEach(() => {
   else process.env.RTK_DISABLED = originalDisabled
 })
 
-function makeHarness({ outcome = { kind: 'pass', reason: 'no rewrite' }, onRewrite, hasBase = true } = {}) {
+function makeHarness({
+  outcome = { kind: 'pass', reason: 'no rewrite' },
+  onRewrite,
+  hasBase = true,
+  getPathPrefix,
+} = {}) {
   const calls = []
   const rewriteCalls = []
   const logs = []
@@ -36,6 +41,7 @@ function makeHarness({ outcome = { kind: 'pass', reason: 'no rewrite' }, onRewri
       return outcome
     },
     cwdFor: () => '/work',
+    getPathPrefix,
     toolAborted: () => Object.assign(new Error('tool call aborted'), { name: 'AbortError' }),
     log: (message) => logs.push(message),
   })
@@ -136,4 +142,71 @@ test('a missing inherited bash tool fails visibly', async () => {
     harness.shadow.execute({ command: 'git status', description: 'Status' }, {}),
     /bash tool is not available/,
   )
+})
+
+test('prepends the managed rtk directory to rewritten commands', async () => {
+  const harness = makeHarness({
+    outcome: { kind: 'rewrite', command: 'rtk git status' },
+    getPathPrefix: () => '/cache/rtk-filter/versions/rtk/1.2.0',
+  })
+  await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(
+    harness.calls[0].args.command,
+    `export PATH='/cache/rtk-filter/versions/rtk/1.2.0':"$PATH"; rtk git status`,
+  )
+})
+
+test('prepends the managed rtk directory to pass-through commands', async () => {
+  const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
+  await harness.shadow.execute({ command: 'echo hello', description: 'Greeting' }, {})
+  assert.equal(harness.calls[0].args.command, `export PATH='/cache/rtk':"$PATH"; echo hello`)
+})
+
+test('prepends the managed rtk directory to commands already using rtk', async () => {
+  const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
+  await harness.shadow.execute({ command: 'rtk gain', description: 'Gain' }, {})
+  assert.equal(harness.rewriteCalls.length, 0)
+  assert.equal(harness.calls[0].args.command, `export PATH='/cache/rtk':"$PATH"; rtk gain`)
+})
+
+test('no overlay is applied for empty commands, disabled rtk, or no prefix', async () => {
+  const empty = makeHarness({ getPathPrefix: () => '/cache/rtk' })
+  await empty.shadow.execute({ command: '   ', description: 'Noop' }, {})
+  assert.equal(empty.calls[0].args.command, '   ')
+
+  process.env.RTK_DISABLED = '1'
+  const disabled = makeHarness({ getPathPrefix: () => '/cache/rtk' })
+  await disabled.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(disabled.calls[0].args.command, 'git status')
+  delete process.env.RTK_DISABLED
+
+  const plain = makeHarness()
+  await plain.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(plain.calls[0].args.command, 'git status')
+})
+
+test('the PATH overlay quotes embedded single quotes', async () => {
+  const harness = makeHarness({
+    outcome: { kind: 'rewrite', command: 'rtk git status' },
+    getPathPrefix: () => "/cache/it's-rtk",
+  })
+  await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(
+    harness.calls[0].args.command,
+    `export PATH='/cache/it'\\''s-rtk':"$PATH"; rtk git status`,
+  )
+})
+
+test('the PATH overlay getter is read for every call', async () => {
+  let prefix
+  const harness = makeHarness({
+    outcome: { kind: 'rewrite', command: 'rtk git status' },
+    getPathPrefix: () => prefix,
+  })
+  await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(harness.calls[0].args.command, 'rtk git status')
+
+  prefix = '/cache/rtk'
+  await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(harness.calls[1].args.command, `export PATH='/cache/rtk':"$PATH"; rtk git status`)
 })
