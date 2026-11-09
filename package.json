@@ -1,0 +1,27 @@
+{
+  "name": "@rtk-ai/dsh-rtk-filter",
+  "version": "0.49.0",
+  "private": true,
+  "description": "Transparently runs DeepSeek Harness bash commands through RTK and returns condensed output.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README_zh.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

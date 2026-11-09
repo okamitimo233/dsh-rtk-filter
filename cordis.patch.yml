@@ -1,0 +1,3 @@
+- insert:
+    - id: rtk-filter
+      name: '@rtk-ai/dsh-rtk-filter'

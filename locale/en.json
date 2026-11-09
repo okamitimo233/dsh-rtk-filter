@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "RTK command filtering",
+    "description": "Runs bash commands through RTK and returns condensed output, without changing the tool set or the model's workflow."
+  }
+}
