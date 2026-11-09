@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "RTK command filtering",
-    "description": "Runs bash commands through RTK and returns condensed output, without changing the tool set or the model's workflow."
+    "description": "Runs bash commands through RTK and returns condensed output, installing and updating its own RTK binary under the DSH cache without changing the tool set."
   }
 }
