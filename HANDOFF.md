@@ -20,8 +20,11 @@
   下载期间作为临时回退。
 - 原始 RTK 仓库 `/home/plana/Repos/rtk` 保持上游状态（HEAD `08a261a0`），
   **后续不要再改动该仓库**；本仓库只读取它的发布信息，不写入。
-- 单元测试：`node --test test/*.test.mjs` → 87/87 通过（含新增的 version、tar、release、
-  sidecar 测试）。
+- 单元测试：`node --test test/*.test.mjs` → 97/97 通过（含 version、tar、release、
+  sidecar、status 与 client bundle 注册测试）。
+- Web 设置页已增加 **设置 → RTK 命令过滤**：顶部切换栏分「状态」与「设置」；状态读取
+  `rtk gain --daily --format json` 展示近 7/30 天调用、节省 Token、节省比例、平均每次
+  节省和每日柱状图；设置页当前为占位。Host 端点为 `GET /rtk-filter/status`。
 
 ## 2. 需求与设计决定
 
@@ -124,6 +127,8 @@ apply
 | `lib/tar.js` | 防御性 tar.gz 解析（只取所需文件） |
 | `lib/sidecar.js` | 缓存根/state/锁/安装/更新/GC 与 `createRtkManager` |
 | `lib/awareness.js` | 系统提示词文本 |
+| `lib/status.js` | Settings 状态端点：把 `rtk gain --daily --format json` 折叠为 7/30 天窗口、运行时健康信息与同源 JSON 响应 |
+| `lib/client.js` | 手写浏览器 bundle：注册 `settings.section` 与中英文字典，渲染状态图表和设置占位页 |
 | `cordis.patch.yml` | bundle patch：insert `rtk-filter` 行 |
 | `package.json` | bundle 清单；`dsh.bundle.patch`、exports、files |
 | `locale/{en,zh}.json` | Plugin Manager 标题/描述 |
@@ -189,7 +194,8 @@ apply
 - 未做/无法做：
   - 由于当前会话审批策略禁用审批，未调用 `plugin_manager` 重新安装/切换插件；
     链接目录中的代码变更需要 Host 重新加载后才在 live 会话生效。
-  - 浏览器页面级视觉验证（无浏览器控制通道）；locale/icon 未变。
+  - 浏览器页面级视觉验证（无浏览器控制通道）；已用 VM 加载 bundle 验证 slot/字典注册，
+    并用真实 RTK 1.2.0 验证 `rtk gain --daily --format json` 聚合。
   - live deny（exit 2）仍未构造真实 Claude deny 规则，仅单测覆盖。
 
 ## 7. 关键坑与注意事项

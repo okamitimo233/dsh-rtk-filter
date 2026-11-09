@@ -17,6 +17,9 @@ background jobs, timeouts, output rendering, spill files, and `[exit code: N]`
 markers behave exactly as before. Only the command that runs, its `PATH`
 overlay while a managed binary is active, and the output the model reads change.
 
+The same plugin adds **Settings → RTK command filtering** to the Web GUI, with a
+compact status dashboard and a placeholder for future options.
+
 ## How it works
 
 ```
@@ -180,6 +183,26 @@ A bundle linked from a checkout cannot resolve DSH's shipped Node packages, so
 the generated Config schema is absent there (the row status is `absent` in the
 Config inspector). The fields above still work: the row's raw `config` reaches
 the plugin and the same defaults apply.
+
+## Settings page
+
+The Web GUI adds **Settings → RTK command filtering** with a compact top bar
+for its two views:
+
+- **Status** — runtime health and version, plus a compact dashboard for the
+  selected window (last 7 or 30 days): RTK calls, tokens saved, savings rate,
+  average saved per call, and a daily savings bar chart. The numbers are read
+  from RTK's own local tracking database through `rtk gain --daily --format
+  json`; they therefore summarize every command RTK recorded on this machine,
+  not only the current browser session.
+- **Settings** — a placeholder for future plugin options. Nothing needs tuning
+  there today; configuration still lives in the profile row shown above.
+
+The browser reads the aggregate payload from the same-origin
+`GET /rtk-filter/status?days=7` resource. The Host route is fenced by the
+Connection trust check when that service is composed and never returns command
+text or binary paths. Turning the plugin off removes the route; the settings
+section then shows its normal retry/error state.
 
 ## Behavior
 

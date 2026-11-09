@@ -2,11 +2,12 @@
   "name": "@rtk-ai/dsh-rtk-filter",
   "version": "0.50.0",
   "private": true,
-  "description": "Transparently runs DeepSeek Harness bash commands through RTK, installing and updating its own RTK binary under the DSH cache.",
+  "description": "Transparently runs DeepSeek Harness bash commands through RTK, installs and updates its own RTK binary, and exposes an RTK status/config section in DSH Settings.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./index.js",
+    "./client": "./lib/client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
@@ -22,6 +23,13 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   }
 }

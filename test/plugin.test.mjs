@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { activate } from '../lib/activate.js'
 import { awarenessText } from '../lib/awareness.js'
+import { aggregateGain, STATUS_PATH } from '../lib/status.js'
 
 const originalBin = process.env.RTK_BIN
 const originalDisabled = process.env.RTK_DISABLED
@@ -80,13 +81,14 @@ function makeManager(overrides = {}) {
   return { manager, state }
 }
 
-function makeCtx(agents = [makeAgent('agent-1')]) {
+function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
   const sections = []
   const handlers = new Map()
   const warnings = []
   const infos = []
   const effects = []
   const settings = []
+  const services = options.services ?? {}
 
   const ctx = {
     tools: {
@@ -126,8 +128,8 @@ function makeCtx(agents = [makeAgent('agent-1')]) {
       handlers.set(name, fn)
       return () => {}
     },
-    get() {
-      return undefined
+    get(name) {
+      return services[name]
     },
   }
 
@@ -395,4 +397,51 @@ test('explicit config reaches the manager unchanged', async () => {
   assert.equal(settings.edition, 'rtk-oss')
   assert.equal(settings.updateIntervalMs, 60_000)
   assert.equal(settings.downloadTimeoutMs, 5_000)
+})
+
+test('registers a status route when the web server is present', async () => {
+  const routes = []
+  const webServer = {
+    register(route) {
+      routes.push(route)
+      return () => {}
+    },
+  }
+  const harness = makeCtx([makeAgent('agent-1')], { services: { webServer } })
+  harness.deps.readGainStatus = async ({ binary, days }) => {
+    assert.equal(binary, '/managed/rtk')
+    return aggregateGain({
+      daily: [{
+        date: '2026-11-10',
+        commands: 4,
+        input_tokens: 400,
+        output_tokens: 100,
+        saved_tokens: 300,
+      }],
+    }, { days, now: new Date('2026-11-10T12:00:00.000Z') })
+  }
+  await activateWith(harness, {}, makeManager().manager)
+
+  assert.equal(routes.length, 1)
+  assert.equal(routes[0].kind, 'exact')
+  assert.equal(routes[0].path, STATUS_PATH)
+
+  const res = {
+    statusCode: 0,
+    headers: {},
+    body: undefined,
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value
+    },
+    end(body) {
+      this.body = body
+    },
+  }
+  await routes[0].handler({ method: 'GET', url: '/rtk-filter/status?days=7', headers: {} }, res)
+  assert.equal(res.statusCode, 200)
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.runtime.state, 'ready')
+  assert.equal(payload.runtime.version, '1.2.0')
+  assert.equal(payload.summary.calls, 4)
+  assert.equal(payload.summary.savedTokens, 300)
 })
