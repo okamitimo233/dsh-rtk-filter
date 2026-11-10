@@ -40,6 +40,48 @@ model calls bash("git status")
 - All rewrite logic lives in the `rtk` binary (`rtk rewrite`). When filters are
   added to RTK, this plugin picks them up with no change.
 
+## Architecture
+
+Solid arrows show component dependencies and invocation paths; dashed arrows
+show activation, binary-management, and settings control relationships. The
+command-level round trip is shown in [How it works](#how-it-works).
+
+```mermaid
+flowchart TB
+    Model["Model / agent"]
+
+    subgraph Plugin["dsh-rtk-filter"]
+        Activate["activate()<br/>lib/activate.js"]
+        Shadow["agent-scoped bash shadow<br/>lib/shadow.js"]
+        Rewrite["rewrite client<br/>lib/rewrite.js"]
+        Manager["managed RTK lifecycle<br/>lib/sidecar.js"]
+        Prompt["system-prompt note<br/>lib/awareness.js"]
+        Status["status route<br/>lib/status.js"]
+    end
+
+    subgraph Host["DeepSeek Harness"]
+        Base["built-in bash<br/>sandbox · approval · jobs · timeouts · spill"]
+        Web["Web server<br/>Connection trust fence"]
+    end
+
+    RTK["rtk binary"]
+    Releases["GitHub Releases<br/>rtk-ai/rtk"]
+    Browser["Settings UI<br/>lib/client.js"]
+
+    Model -->|"calls"| Shadow
+    Shadow -->|"rtk rewrite"| Rewrite -->|"execFile"| RTK
+    Shadow -->|"delegates"| Base -->|"runs rtk CMD"| RTK
+
+    Activate -.->|"registers"| Shadow
+    Activate -.-> Prompt
+    Activate -.-> Manager
+    Activate -.-> Status
+    Manager -.->|"binary + PATH prefix"| Shadow
+    Manager -.->|"downloads / verifies"| Releases
+
+    Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
+```
+
 ## Requirements
 
 - POSIX `bash` (the built-in `bash` tool). Windows `pwsh` is not covered.

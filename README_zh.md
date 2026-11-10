@@ -36,6 +36,47 @@ model calls bash("git status")
 - 所有改写逻辑都在 `rtk` 二进制中（`rtk rewrite`）。当 RTK 新增过滤器时，本插件无需
   改动即可自动用上。
 
+## 架构
+
+实线表示组件依赖与调用路径，虚线表示激活、二进制管理和设置页的控制关系。
+单次命令的往返流程见[工作原理](#工作原理)。
+
+```mermaid
+flowchart TB
+    Model["模型 / agent"]
+
+    subgraph Plugin["dsh-rtk-filter"]
+        Activate["activate()<br/>lib/activate.js"]
+        Shadow["agent 作用域 bash 影子<br/>lib/shadow.js"]
+        Rewrite["rewrite 客户端<br/>lib/rewrite.js"]
+        Manager["托管 RTK 生命周期<br/>lib/sidecar.js"]
+        Prompt["system prompt 提示<br/>lib/awareness.js"]
+        Status["状态路由<br/>lib/status.js"]
+    end
+
+    subgraph Host["DeepSeek Harness"]
+        Base["内置 bash<br/>沙箱 · 审批 · 后台任务 · 超时 · 输出溢出"]
+        Web["Web 服务器<br/>Connection 信任检查"]
+    end
+
+    RTK["rtk 二进制"]
+    Releases["GitHub Releases<br/>rtk-ai/rtk"]
+    Browser["设置页<br/>lib/client.js"]
+
+    Model -->|"调用"| Shadow
+    Shadow -->|"rtk rewrite"| Rewrite -->|"execFile"| RTK
+    Shadow -->|"委托"| Base -->|"运行 rtk CMD"| RTK
+
+    Activate -.->|"注册"| Shadow
+    Activate -.-> Prompt
+    Activate -.-> Manager
+    Activate -.-> Status
+    Manager -.->|"二进制 + PATH 前缀"| Shadow
+    Manager -.->|"下载 / 校验"| Releases
+
+    Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
+```
+
 ## 环境要求
 
 - POSIX `bash`（即内置 `bash` 工具）。不覆盖 Windows 的 `pwsh`。
