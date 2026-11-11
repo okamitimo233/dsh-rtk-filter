@@ -292,9 +292,17 @@ Additional rules:
 - **Platform**: POSIX `bash` only; the Windows `pwsh` tool is not filtered.
   Managed downloads support Linux and macOS on x64 and arm64.
 - **Inherited definition**: the plugin captures the agent's `bash` definition
-  when it installs for that agent. A preset that re-registers `bash` with a
-  different schema during a live session is not re-mirrored until the plugin
-  reloads (the stock Web preset composes `bash` once, before the agent starts).
+  when it installs for that agent and re-checks it on `tools/change`: when the
+  visible `bash` is neither the shadow nor the captured definition, the old
+  registration is released and the new definition is mirrored. Switching the
+  preset during a live session can still leave the schema one tool change
+  behind.
+- **Preset shape guard**: the `minimal` preset's bash accepts `command` only.
+  When the captured `bash` declares other parameters (the standard
+  `dsh-tool-bash` declares `description`/`workdir`, for example), the plugin
+  treats that definition as belonging to another plane and installs nothing:
+  it filters less rather than changing the tool's schema and execution
+  semantics. Unlisted presets are unaffected.
 - **Managed binary scope**: the plugin-owned RTK is on `PATH` only inside bash
   calls it delegates, not in the user's terminal or other DSH processes. A
   system `rtk` is not updated by the plugin; explicit `binary`/`RTK_BIN`

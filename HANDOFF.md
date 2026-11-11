@@ -249,9 +249,10 @@ apply
    - 如果某个 preset/subagent 用 `deny: ['bash']` 隐藏全局 bash，影子仍可能可见。
    - 当前 stock profile 和 plan mode 都不 deny bash；已写入 README 限制。
 
-10. **捕获的继承定义不会在 preset 重注册后自动刷新**
-    - 安装时捕获一次；如果 preset 在会话中重新注册不同 schema 的 bash，需要重新加载插件。
-    - stock Web preset 在 agent 启动前组合一次 bash，正常使用不会触发。
+10. **捕获的继承定义会在 tools/change 时重新核对**
+    - `installed` 存 `{ definition, base, dispose }`；`tools/change` 时若可见 bash 既不是
+      影子、也不是已捕获的 base，就释放旧注册并按新 base 重装（覆盖 preset 晚挂载与上游换定义）。
+    - 会话运行中切换 preset 仍可能让 schema 滞后到下一次工具变更，属已知限制。
 
 11. **session log 记录的是模型原始命令**
     - 实际执行的是改写后的 `rtk ...`（以及 PATH 覆盖层）；只有 `logRewrites: true` 时才在
@@ -265,6 +266,17 @@ apply
 13. **`RTK_BIN` 是 Host 进程环境变量**
     - 修改它需要重启 DSH Host 才生效；普通 profile 配置中的 `binary` 不需要。
     - 设置 `RTK_BIN` 或非默认 `binary` 会禁用托管安装/更新。
+
+14. **preset 形状守卫：宁可不过滤，也不换语义**
+    - 极简模式（`minimal`）的 bash 由 `dsh-tool-bash-persistent` 提供，只有一个参数
+      `command`；标准 bash 声明 `description`/`workdir`/`timeoutMs` 等。
+    - `EXPECTED_SHELL` 表里登记了 `minimal: { required: ['command'], properties:
+      ['command'] }`。捕获到的定义若带表外参数，说明它来自别的平面（host/其它 preset），
+      插件不注册、只记一条 info，等下一次 `tools/change` 重新解析。
+    - 症状背景：极简会话中出现 `invalid arguments: missing required property
+      "description"`，是因为影子曾把标准 bash 的 schema 镜像进极简会话，模型按标准 schema
+      被要求填 `description`，漏填即被被委托的 `dsh-tool-bash` 校验拒绝。
+    - 新增 stock preset 时先确认其 bash 形状，再决定是否登记；未登记 preset 行为不变。
 
 ## 8. 运维操作
 
