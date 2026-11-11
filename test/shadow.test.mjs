@@ -1,5 +1,6 @@
 import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 
 import { createBashShadow } from '../lib/shadow.js'
 
@@ -152,21 +153,21 @@ test('prepends the managed rtk directory to rewritten commands', async () => {
   await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
   assert.equal(
     harness.calls[0].args.command,
-    `export PATH='/cache/rtk-filter/versions/rtk/1.2.0':"$PATH"; rtk git status`,
+    `__rtk_prefix='/cache/rtk-filter/versions/rtk/1.2.0'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk git status`,
   )
 })
 
 test('prepends the managed rtk directory to pass-through commands', async () => {
   const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
   await harness.shadow.execute({ command: 'echo hello', description: 'Greeting' }, {})
-  assert.equal(harness.calls[0].args.command, `export PATH='/cache/rtk':"$PATH"; echo hello`)
+  assert.equal(harness.calls[0].args.command, `__rtk_prefix='/cache/rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; echo hello`)
 })
 
 test('prepends the managed rtk directory to commands already using rtk', async () => {
   const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
   await harness.shadow.execute({ command: 'rtk gain', description: 'Gain' }, {})
   assert.equal(harness.rewriteCalls.length, 0)
-  assert.equal(harness.calls[0].args.command, `export PATH='/cache/rtk':"$PATH"; rtk gain`)
+  assert.equal(harness.calls[0].args.command, `__rtk_prefix='/cache/rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk gain`)
 })
 
 test('no overlay is applied for empty commands, disabled rtk, or no prefix', async () => {
@@ -193,7 +194,7 @@ test('the PATH overlay quotes embedded single quotes', async () => {
   await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
   assert.equal(
     harness.calls[0].args.command,
-    `export PATH='/cache/it'\\''s-rtk':"$PATH"; rtk git status`,
+    `__rtk_prefix='/cache/it'\\''s-rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk git status`,
   )
 })
 
@@ -208,5 +209,17 @@ test('the PATH overlay getter is read for every call', async () => {
 
   prefix = '/cache/rtk'
   await harness.shadow.execute({ command: 'git status', description: 'Status' }, {})
-  assert.equal(harness.calls[1].args.command, `export PATH='/cache/rtk':"$PATH"; rtk git status`)
+  assert.equal(harness.calls[1].args.command, `__rtk_prefix='/cache/rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk git status`)
+})
+
+test('the overlay keeps PATH stable when the same shell runs it twice', { skip: process.platform === 'win32' }, async () => {
+  const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
+  await harness.shadow.execute({ command: 'echo hi', description: 'Greeting' }, {})
+  const overlay = harness.calls[0].args.command.slice(0, harness.calls[0].args.command.lastIndexOf('echo hi'))
+
+  // One bash process models the minimal preset's persistent shell: the second
+  // call must not append the directory a second time.
+  const out = execFileSync('bash', ['-c', `${overlay}${overlay}printf '%s' "$PATH"`], { encoding: 'utf8' })
+  const entries = out.split(':').filter((entry) => entry === '/cache/rtk')
+  assert.equal(entries.length, 1)
 })
