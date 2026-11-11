@@ -293,6 +293,12 @@ apply
     - 覆盖层把目录写进 `__rtk_prefix`，避免和用户变量重名；判定用 bash 的 case 模式，
       路径里的单引号仍由 `shellQuote` 处理。
 
+16. **awareness 里写明 command-only shell 没有 `workdir`**
+    - 极简模式的 bash 只声明 `command`，`workdir`/`timeoutMs` 会被静默丢弃（实测：
+      传了不报错、也不生效），agent 容易误判“目录没切过去”。
+    - `lib/awareness.js` 末尾补了一句：只有 `command` 时用命令内的 `cd /path && ...`，
+      该 shell 会把目录留到后续调用。
+
 ## 8. 运维操作
 
 安装 / 重装：

@@ -245,6 +245,9 @@ test('registers the awareness section and an agent-scoped bash shadow', async ()
   assert.equal(section.order, 1001)
   assert.equal(section.text, awarenessText)
   assert.match(section.text, /RTK/)
+  // A command-only shell has no `workdir`; the note has to say so, because a
+  // silently dropped `workdir` reads as a broken tool.
+  assert.match(section.text, /cd \/path/)
 
   assert.equal(harness.settings[0].binary, 'rtk')
   assert.equal(harness.shadowCalls.length, 1)
