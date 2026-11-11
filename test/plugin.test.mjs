@@ -32,7 +32,8 @@ function makeAgent(id, agentPreset) {
       },
     },
   }
-  if (agentPreset !== undefined) agent.session = { header: { agentPreset } }
+  agent.session = { id, header: {} }
+  if (agentPreset !== undefined) agent.session.header.agentPreset = agentPreset
   return agent
 }
 
@@ -139,9 +140,10 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
     tools: {
       get(name, scope) {
         // Mimic the Web surface: the built-in bash tool lives in the agent
-        // preset realm, so the unscoped global lookup does not see it.
+        // preset realm, so the unscoped global lookup does not see it, and a
+        // registered shadow takes the name over from what it mirrors.
         if (name !== 'bash' || scope === undefined) return undefined
-        return visibleBash
+        return scope.registrations?.at(-1) ?? visibleBash
       },
     },
     agents: { list: () => agents },
@@ -215,6 +217,15 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
     setBash(next) {
       visibleBash = next
     },
+  }
+}
+
+/** A registry stand-in whose committed selection the test can advance. */
+function makePresets(initial) {
+  const state = { preset: initial }
+  return {
+    state,
+    service: { presetForSession: () => state.preset },
   }
 }
 
@@ -529,17 +540,58 @@ test('a preset bash that mounts late is picked up on tools/change', async () => 
   assert.equal(harness.shadowCalls[0].getBase().description, 'Run commands in a bash shell')
 })
 
-test('a recomposed inherited bash is re-mirrored on tools/change', async () => {
-  const harness = makeCtx()
+test('a preset switch re-captures the bash the new composition mounts', async () => {
+  const presets = makePresets('standard')
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls[0].getBase().description, 'Execute a bash command')
+
+  // The registry recomposes the agent first and appends the selection after.
+  harness.setBash(persistentBash())
+  presets.state.preset = 'minimal'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 2)
+  assert.equal(harness.shadowCalls[1].getBase().description, 'Run commands in a bash shell')
+})
+
+test('a switch to minimal drops a shadow captured under the previous preset', async () => {
+  const presets = makePresets('ops-ptc')
+  const harness = makeCtx([makeAgent('agent-1', 'ops-ptc')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
   await activateWith(harness, {}, makeManager().manager)
   const agent = harness.ctx.agents.list()[0]
   assert.equal(agent.registrations.length, 1)
 
-  const next = { ...persistentBash() }
-  harness.setBash(next)
-  harness.handlers.get('tools/change')()
+  presets.state.preset = 'minimal'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  // The standard bash is still the only one visible: leave it unfiltered rather
+  // than keep mirroring a shape the minimal preset never composes.
+  assert.equal(agent.registrations.length, 0)
+  assert.equal(harness.shadowCalls.length, 1)
+  assert.match(harness.infos.join('\n'), /leaving the minimal preset's bash unfiltered/)
+})
+
+test('a selection event for another session leaves this agent alone', async () => {
+  const presets = makePresets('standard')
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+
+  harness.handlers.get('agent-preset/selected')('session-someone-else')
 
   assert.equal(agent.registrations.length, 1)
-  assert.equal(harness.shadowCalls.length, 2)
-  assert.equal(harness.shadowCalls[1].getBase(), next)
+  assert.equal(harness.shadowCalls.length, 1)
 })

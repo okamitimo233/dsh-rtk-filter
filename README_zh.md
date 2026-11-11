@@ -251,9 +251,12 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
   都不禁用 `bash`。
 - **平台**：仅 POSIX `bash`；Windows 的 `pwsh` 工具不会被过滤。托管下载支持 Linux 和
   macOS 的 x64 与 arm64。
-- **继承的定义**：插件在为其 agent 安装时捕获该 agent 的 `bash` 定义，并在
-  `tools/change` 时重新核对：可见的 `bash` 既不是影子、也不是已捕获的定义时，会释放旧
-  注册并按新定义重装。会话运行中切换 preset 仍可能让 schema 滞后到下一次工具变更。
+- **继承的定义**：插件在为其 agent 安装时捕获该 agent 的 `bash` 定义。影子一旦占住
+  `bash` 名字，agent 自己的查找只会返回影子，因此之后的上游替换在 `tools/change` 里
+  看不见；切换 preset 时插件会丢弃旧影子并重新捕获，再由形状守卫决定新 bash 能否被镜像。
+  “当前 preset”取自注册表投影（`presetForSession`），而不是创建时的 header：Web 端先用
+  registry 默认 preset 建会话、随后才选中用户的 preset，所以切换过的会话 header 记的是
+  它出生时的那个。
 - **preset 形状守卫**：极简模式（`minimal`）的 bash 只接受 `command`。若捕获到的 `bash`
   声明了其它参数（例如标准 `dsh-tool-bash` 的 `description`/`workdir`），插件判定这份
   定义不属于该 preset，宁可不安装、不过滤，也不改变工具 schema 与执行语义。未登记的

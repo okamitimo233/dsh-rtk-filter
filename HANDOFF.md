@@ -252,7 +252,9 @@ apply
 10. **捕获的继承定义会在 tools/change 时重新核对**
     - `installed` 存 `{ definition, base, dispose }`；`tools/change` 时若可见 bash 既不是
       影子、也不是已捕获的 base，就释放旧注册并按新 base 重装（覆盖 preset 晚挂载与上游换定义）。
-    - 会话运行中切换 preset 仍可能让 schema 滞后到下一次工具变更，属已知限制。
+    - 影子一旦占住 `bash` 名字，`ctx.tools.get` 只会返回影子自己，所以“上游换了定义”在
+      `tools/change` 里看不出来。能看见的只有“影子捕获时所属的 preset 与当前 preset 不一致”，
+      这条线索由 preset 切换事件负责（见第 14 条）。
 
 11. **session log 记录的是模型原始命令**
     - 实际执行的是改写后的 `rtk ...`（以及 PATH 覆盖层）；只有 `logRewrites: true` 时才在
@@ -277,6 +279,12 @@ apply
       "description"`，是因为影子曾把标准 bash 的 schema 镜像进极简会话，模型按标准 schema
       被要求填 `description`，漏填即被被委托的 `dsh-tool-bash` 校验拒绝。
     - 新增 stock preset 时先确认其 bash 形状，再决定是否登记；未登记 preset 行为不变。
+    - “当前 preset”以 `agentPresets.presetForSession(session)` 投影为准，header 只作兜底：
+      Web 端先用 registry 默认 preset 建会话，随后才 `select()` 用户选的 preset，所以 header
+      永远停在创建时的那个（实测：ops-ptc 建、2 秒后切 minimal 的会话，header 仍是 ops-ptc）。
+    - `select()` 先 `recompose()` 再 append `agent-preset/selected`，插件收到事件时新 bash
+      已经挂好。此时丢弃旧影子并重新捕获，就能从“钉住上一套 preset 的 schema”变成镜像
+      新 preset 自己的 shell；若新可见的定义形状仍不符，就走守卫放行、不过滤。
 
 ## 8. 运维操作
 

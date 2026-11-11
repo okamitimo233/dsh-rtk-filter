@@ -292,11 +292,14 @@ Additional rules:
 - **Platform**: POSIX `bash` only; the Windows `pwsh` tool is not filtered.
   Managed downloads support Linux and macOS on x64 and arm64.
 - **Inherited definition**: the plugin captures the agent's `bash` definition
-  when it installs for that agent and re-checks it on `tools/change`: when the
-  visible `bash` is neither the shadow nor the captured definition, the old
-  registration is released and the new definition is mirrored. Switching the
-  preset during a live session can still leave the schema one tool change
-  behind.
+  when it installs for that agent. Once the shadow owns the `bash` name the
+  agent's own lookup returns the shadow, so a later replacement is not visible
+  through `tools/change`; the mirror is re-captured when the agent's preset
+  changes, and the shape guard then decides whether the new bash may be
+  mirrored. The preset in force is read from the registry projection
+  (`presetForSession`), not the creation header: the Web surface creates a
+  session under the registry default and selects the user's preset afterwards,
+  so a switched session's header records the preset it was born with.
 - **Preset shape guard**: the `minimal` preset's bash accepts `command` only.
   When the captured `bash` declares other parameters (the standard
   `dsh-tool-bash` declares `description`/`workdir`, for example), the plugin
