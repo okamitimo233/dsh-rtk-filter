@@ -474,3 +474,54 @@ test('an unsupported platform does not attempt a download', async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('schedules the next update check from the cached lookup time', async () => {
+  const root = tempRoot()
+  const release = makeRelease()
+  try {
+    // Seed a managed copy whose latest.json records the lookup at now() = 1000.
+    const first = await managerFor({
+      root,
+      release,
+      settings: { autoUpdate: false },
+      deps: { now: () => 1_000 },
+    })
+    await first.manager.start().ready
+    first.manager.dispose()
+
+    const timers = []
+    const cleared = []
+    const second = await managerFor({
+      root,
+      release: {
+        calls: [],
+        fetchImpl: async () => {
+          throw new Error('no network expected while scheduling')
+        },
+      },
+      settings: { autoUpdate: true },
+      deps: {
+        now: () => 1_000,
+        setTimeout: (callback, delay) => {
+          const handle = { callback, delay, unref() {} }
+          timers.push(handle)
+          return handle
+        },
+        clearTimeout: (handle) => cleared.push(handle),
+      },
+    })
+
+    await second.manager.start().ready
+    // scheduleNext runs in the background after ready resolves.
+    for (let attempt = 0; attempt < 500 && timers.length === 0; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    assert.equal(timers.length, 1)
+    assert.equal(timers[0].delay, 60_000)
+
+    second.manager.dispose()
+    assert.deepEqual(cleared, timers)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
