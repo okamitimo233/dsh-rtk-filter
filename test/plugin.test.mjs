@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { activate } from '../lib/activate.js'
-import { awarenessText, awarenessTextWithShell } from '../lib/awareness.js'
+import { awarenessText, shellOnlyNote } from '../lib/awareness.js'
 import { aggregateGain, STATUS_PATH } from '../lib/status.js'
 
 const originalBin = process.env.RTK_BIN
@@ -466,6 +466,61 @@ test('explicit config reaches the manager unchanged', async () => {
   assert.equal(settings.downloadTimeoutMs, 5_000)
 })
 
+test('malformed config values fall back to the documented defaults', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, {
+    enabled: 0,
+    awareness: 1,
+    binary: '   ',
+    rewriteTimeoutMs: 0,
+    logRewrites: 'yes',
+    version: '',
+    edition: 'unknown-edition',
+    updateIntervalMs: 59_999,
+    downloadTimeoutMs: Number.NaN,
+  }, makeManager().manager)
+  const settings = harness.settings[0]
+  assert.equal(settings.enabled, true)
+  assert.equal(settings.awareness, true)
+  assert.equal(settings.binary, 'rtk')
+  assert.equal(settings.rewriteTimeoutMs, 2000)
+  assert.equal(settings.logRewrites, false)
+  assert.equal(settings.version, 'latest')
+  assert.equal(settings.edition, 'rtk')
+  assert.equal(settings.updateIntervalMs, 86_400_000)
+  assert.equal(settings.downloadTimeoutMs, 120_000)
+})
+
+test('the optional Config schema is generated from the shared option table', async () => {
+  const { OPTIONS, buildConfigSchema, normalizeConfig } = await import('../lib/config.js')
+  const field = (kind) => {
+    const builder = {
+      kind,
+      default(value) { builder.defaultValue = value; return builder },
+      step(value) { builder.stepValue = value; return builder },
+      min(value) { builder.minValue = value; return builder },
+    }
+    return builder
+  }
+  const z = {
+    boolean: () => field('boolean'),
+    string: () => field('string'),
+    number: () => field('number'),
+    object: (shape) => ({ shape }),
+  }
+  const schema = buildConfigSchema(z)
+  assert.deepEqual(Object.keys(schema.shape), OPTIONS.map((option) => option.key))
+  for (const option of OPTIONS) {
+    const builder = schema.shape[option.key]
+    assert.equal(builder.defaultValue, option.default)
+    if (option.kind === 'number') {
+      assert.equal(builder.stepValue, 1)
+      assert.equal(builder.minValue, option.min)
+    }
+  }
+  assert.deepEqual(Object.keys(normalizeConfig(undefined)), OPTIONS.map((option) => option.key))
+})
+
 test('registers a status route when the web server is present', async () => {
   const routes = []
   const webServer = {
@@ -541,7 +596,7 @@ test('the persistent-shell note is scoped to the agent whose bash is command-onl
   assert.equal(harness.sections[0].text, awarenessText)
   assert.equal(agent.sections.length, 1)
   assert.equal(agent.sections[0].name, 'rtk:command-output')
-  assert.equal(agent.sections[0].text, awarenessTextWithShell)
+  assert.equal(agent.sections[0].text, `${awarenessText} ${shellOnlyNote}`)
   assert.match(agent.sections[0].text, /cd \/path/)
 })
 
