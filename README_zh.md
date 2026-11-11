@@ -47,9 +47,12 @@ flowchart TB
 
     subgraph Plugin["dsh-rtk-filter"]
         Activate["activate()<br/>lib/activate.js"]
+        Config["选项表<br/>lib/config.js"]
+        Shell["preset-shell 模型<br/>lib/shell.js"]
         Shadow["agent 作用域 bash 影子<br/>lib/shadow.js"]
-        Rewrite["rewrite 客户端<br/>lib/rewrite.js"]
+        Rewrite["rewrite 协议<br/>lib/rewrite.js"]
         Manager["托管 RTK 生命周期<br/>lib/sidecar.js"]
+        Store["缓存状态 · 锁<br/>lib/store.js · lib/fsx.js"]
         Prompt["system prompt 提示<br/>lib/awareness.js"]
         Status["状态路由<br/>lib/status.js"]
     end
@@ -68,14 +71,20 @@ flowchart TB
     Shadow -->|"委托"| Base -->|"运行 rtk CMD"| RTK
 
     Activate -.->|"注册"| Shadow
+    Activate -.->|"shell 策略"| Shell
+    Activate -.->|"与配置归一化"| Config
     Activate -.-> Prompt
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"二进制 + PATH 前缀"| Shadow
+    Manager -.->|"state · 锁 · GC"| Store
     Manager -.->|"下载 / 校验"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
+
+共享辅助模块：`lib/proc.js`（子进程、abort 契约、错误文本）同时被过滤路径与安装器使用。
+完整的模块地图、依赖规则与“唯一来源”清单见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 环境要求
 
@@ -303,4 +312,6 @@ manager.dispose()
 
 ## Handoff
 
-实现历史、运维说明、验证记录和已知坑点见 [HANDOFF.md](HANDOFF.md)。
+实现历史、运维说明、验证记录和已知坑点见 [HANDOFF.md](HANDOFF.md)。当前模块边界见
+[ARCHITECTURE.md](docs/ARCHITECTURE.md)；重构动机与提交考古见
+[COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md)。

@@ -52,9 +52,12 @@ flowchart TB
 
     subgraph Plugin["dsh-rtk-filter"]
         Activate["activate()<br/>lib/activate.js"]
+        Config["option table<br/>lib/config.js"]
+        Shell["preset-shell model<br/>lib/shell.js"]
         Shadow["agent-scoped bash shadow<br/>lib/shadow.js"]
-        Rewrite["rewrite client<br/>lib/rewrite.js"]
+        Rewrite["rewrite protocol<br/>lib/rewrite.js"]
         Manager["managed RTK lifecycle<br/>lib/sidecar.js"]
+        Store["cache state · lock<br/>lib/store.js · lib/fsx.js"]
         Prompt["system-prompt note<br/>lib/awareness.js"]
         Status["status route<br/>lib/status.js"]
     end
@@ -73,14 +76,22 @@ flowchart TB
     Shadow -->|"delegates"| Base -->|"runs rtk CMD"| RTK
 
     Activate -.->|"registers"| Shadow
+    Activate -.->|"shell policy"| Shell
+    Activate -.->|"normalizes with"| Config
     Activate -.-> Prompt
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"binary + PATH prefix"| Shadow
+    Manager -.->|"state · lock · GC"| Store
     Manager -.->|"downloads / verifies"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
+
+Shared helpers: `lib/proc.js` (child process, abort contract, error text) is
+used by both the filter and the installer. The full module map, dependency
+rules, and single-sources-of-truth are in
+[ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
@@ -354,4 +365,4 @@ manager.dispose()
 
 ## Handoff
 
-See [HANDOFF.md](HANDOFF.md) for the implementation history, operational notes, verification record, and known pitfalls.
+See [HANDOFF.md](HANDOFF.md) for the implementation history, operational notes, verification record, and known pitfalls. [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module boundaries; [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains why they exist.

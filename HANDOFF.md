@@ -20,8 +20,10 @@
   下载期间作为临时回退。
 - 原始 RTK 仓库 `/home/plana/Repos/rtk` 保持上游状态（HEAD `08a261a0`），
   **后续不要再改动该仓库**；本仓库只读取它的发布信息，不写入。
-- 单元测试：`node --test test/*.test.mjs` → 97/97 通过（含 version、tar、release、
-  sidecar、status 与 client bundle 注册测试）。
+- 单元测试：`node --test test/*.test.mjs` → **175/175** 通过（含 shell profile、config、
+  rewrite 解释器、release、tar、fsx/store、sidecar、status 与 client bundle 注册测试）。
+- 模块化重构分支：`refactor/consolidate-patches`。提交考古与补丁链分析见
+  `docs/COMMIT_REVIEW.md`；当前模块边界、依赖规则与不变量见 `docs/ARCHITECTURE.md`。
 - Web 设置页已增加 **设置 → RTK 命令过滤**：顶部切换栏分「状态」与「设置」；状态读取
   `rtk gain --daily --format json` 展示近 7/30 天调用、节省 Token、节省比例、平均每次
   节省和每日柱状图；设置页当前为占位。Host 端点为 `GET /rtk-filter/status`。
@@ -118,17 +120,24 @@ apply
 
 | 文件 | 作用 |
 |---|---|
-| `index.js` | 插件入口：`name`/`inject`/可选 `Config`/`apply`；只在动态 import 成功时提供 schemastery Config；提供 rewrite 冒烟函数 |
-| `lib/activate.js` | 激活逻辑：配置归一化、manager 创建、惰性影子注册、prompt 时机、生命周期清理 |
-| `lib/shadow.js` | 同名 bash 定义、getter 镜像、PATH 覆盖层、执行委托 |
-| `lib/rewrite.js` | `probeRtk` / `rewriteCommand`，解释 `rtk rewrite` 退出码；支持 abort signal |
+| `index.js` | 插件入口：`name`/`inject`/`Config`（由 `lib/config.js` 生成）/`apply`；提供 rewrite 冒烟函数 |
+| `lib/config.js` | 选项默认值、归一化与 schemastery 描述符（唯一来源） |
+| `lib/activate.js` | 激活编排：manager 创建、惰性影子注册/重捕获、prompt 时机、status 路由、生命周期清理 |
+| `lib/shell.js` | preset shell profile：形状策略表、接受性判定、幂等 PATH 覆盖层、提示文本组合 |
+| `lib/shadow.js` | 同名 bash 定义、getter 镜像、执行委托（消费 shell.js 的覆盖层） |
+| `lib/rewrite.js` | `probeRtk` / `interpretRewrite` / `rewriteCommand`：`rtk rewrite` 退出码协议 |
+| `lib/proc.js` | 子进程执行、abort 错误契约、错误文本（唯一来源） |
 | `lib/version.js` | 版本解析/比较/最低版本门禁/tag 归一化 |
 | `lib/release.js` | 平台 target、资产名、URL、checksums、latest tag、归档下载 |
 | `lib/tar.js` | 防御性 tar.gz 解析（只取所需文件） |
-| `lib/sidecar.js` | 缓存根/state/锁/安装/更新/GC 与 `createRtkManager` |
-| `lib/awareness.js` | 系统提示词文本 |
-| `lib/status.js` | Settings 状态端点：把 `rtk gain --daily --format json` 折叠为 7/30 天窗口、运行时健康信息与同源 JSON 响应 |
+| `lib/fsx.js` | 原子 JSON 写、临时路径、静默删除、根内路径校验、可执行文件判定 |
+| `lib/store.js` | 缓存布局、state schema、版本列举、GC、latest 缓存、跨进程锁（无网络） |
+| `lib/sidecar.js` | 托管二进制的组装层：来源解析、安装器、更新调度（`createRtkManager`） |
+| `lib/awareness.js` | 系统提示词文本（纯数据） |
+| `lib/status.js` | `rtk gain` 聚合、纯 payload 构造与同源 JSON 路由 |
 | `lib/client.js` | 手写浏览器 bundle：注册 `settings.section` 与中英文字典，渲染状态图表和设置占位页 |
+| `docs/COMMIT_REVIEW.md` | 18 个提交的分类、5 条补丁链与合并映射（中文） |
+| `docs/ARCHITECTURE.md` | 当前模块地图、依赖规则、数据流与不变量 |
 | `cordis.patch.yml` | bundle patch：insert `rtk-filter` 行 |
 | `package.json` | bundle 清单；`dsh.bundle.patch`、exports、files |
 | `locale/{en,zh}.json` | Plugin Manager 标题/描述 |
@@ -174,7 +183,7 @@ apply
 
 已实际执行并通过：
 
-- `node --test test/*.test.mjs` → 87/87 通过。
+- `node --test test/*.test.mjs` → 175/175 通过（2026-11-12 在重构分支实测）。
   - rewrite 退出码/超时/ENOENT/abort；
   - shadow 镜像、委托、PATH 覆盖层、引号转义；
   - activate 的 prompt 时机、后台 ready、失败惰性、生命周期；
@@ -250,7 +259,7 @@ apply
    - 当前 stock profile 和 plan mode 都不 deny bash；已写入 README 限制。
 
 10. **捕获的继承定义会在 tools/change 时重新核对**
-    - `installed` 存 `{ definition, base, dispose }`；`tools/change` 时若可见 bash 既不是
+    - `installed` 存 `{ definition, base, profile, dispose }`；`tools/change` 时若可见 bash 既不是
       影子、也不是已捕获的 base，就释放旧注册并按新 base 重装（覆盖 preset 晚挂载与上游换定义）。
     - 影子一旦占住 `bash` 名字，`ctx.tools.get` 只会返回影子自己，所以“上游换了定义”在
       `tools/change` 里看不出来。能看见的只有“影子捕获时所属的 preset 与当前 preset 不一致”，
@@ -272,9 +281,9 @@ apply
 14. **preset 形状守卫：宁可不过滤，也不换语义**
     - 极简模式（`minimal`）的 bash 由 `dsh-tool-bash-persistent` 提供，只有一个参数
       `command`；标准 bash 声明 `description`/`workdir`/`timeoutMs` 等。
-    - `EXPECTED_SHELL` 表里登记了 `minimal: { required: ['command'], properties:
-      ['command'] }`。捕获到的定义若带表外参数，说明它来自别的平面（host/其它 preset），
-      插件不注册、只记一条 info，等下一次 `tools/change` 重新解析。
+    - `lib/shell.js` 的 `PRESET_SHELLS` 表里登记了 `minimal: { required: ['command'],
+      properties: ['command'] }`。捕获到的定义若带表外参数，说明它来自别的平面（host/其它
+      preset），插件不注册、只记一条 info，等下一次 `tools/change` 重新解析。
     - 症状背景：极简会话中出现 `invalid arguments: missing required property
       "description"`，是因为影子曾把标准 bash 的 schema 镜像进极简会话，模型按标准 schema
       被要求填 `description`，漏填即被被委托的 `dsh-tool-bash` 校验拒绝。
@@ -291,7 +300,8 @@ apply
       实测 9 次调用后 PATH 里出现 9 份托管目录。现在先 `case ":$PATH:" in
       *":$__rtk_prefix:"*)` 判重，只在缺失时添加；标准模式每次新起 shell，行为不变。
     - 覆盖层把目录写进 `__rtk_prefix`，避免和用户变量重名；判定用 bash 的 case 模式，
-      路径里的单引号仍由 `shellQuote` 处理。
+      路径里的单引号仍由 `shellQuote` 处理。实现统一在 `lib/shell.js` 的
+      `withRtkPath`，shadow 只负责调用。
 
 16. **awareness 里写明 command-only shell 没有 `workdir`**
     - 极简模式的 bash 只声明 `command`，`workdir`/`timeoutMs` 会被静默丢弃（实测：
@@ -301,6 +311,14 @@ apply
       所以标准模式会话看不到它。
     - 生命周期跟随影子：安装时（或 prompt 就绪后）加上，`drop()`、preset 切换、agent
       销毁时移除；`awareness: false` 时全局段不出现，局部段也不加。
+    - 文本由 `lib/shell.js` 的 `composeAwareness(profile)` 组合；`awareness.js` 只保留
+      两段纯文本数据。
+
+17. **abort 错误有两个 code，按来源区分**
+    - 进程/安装取消走 `lib/proc.js` 的 `abortError()`（默认 `code = 'ABORT_ERR'`）；
+      工具调用取消（影子把 `rtk rewrite` 的中止转成一次工具失败）走
+      `index.js` 的 `abortError('tool call aborted', 'ABORTED')`。
+    - 两者 `name` 都是 `AbortError`，Host 按 name 渲染；测试亦只断言 name。
 
 ## 8. 运维操作
 
@@ -340,7 +358,8 @@ rm -rf "$HOME/.dsh/cache/rtk-filter"
 
 - 配置 git remote（GitHub/GitLab）并推送提交；补 CI（`node --test`）。
 - 若发布为 npm 包并复制进 profile，验证 Config schema 是否恢复可用。
-- 在 `tools/change` 时刷新捕获的继承定义（需处理 unregister/re-register 与事件递归）。
+- ~~在 `tools/change` 时刷新捕获的继承定义~~（已实现：`activate.js` 的 `reconcile()`，
+  见 §7.10）。
 - 支持 Windows 的 `pwsh` 工具（目前仅 POSIX `bash`，托管下载也仅 Linux/macOS）。
 - 视需要增加安装重试/退避（当前首次安装失败后依赖下次激活重试）。
 - 视需要把托管状态通过 `ctx.shellEnv` 暴露为 `$DSH_RTK_BIN` 等变量。
@@ -354,3 +373,4 @@ rm -rf "$HOME/.dsh/cache/rtk-filter"
   https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh
 - DSH 插件开发规范见宿主内的 `cordis-plugin-development` skill 及其 references。
 - 插件行 id：`rtk-filter`；Loader entry：`include:rtk-filter`。
+- 本仓库架构文档：`docs/ARCHITECTURE.md`；提交审查与补丁链分析：`docs/COMMIT_REVIEW.md`。

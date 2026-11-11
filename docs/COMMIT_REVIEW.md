@@ -265,3 +265,20 @@ grep -n "EXPECTED_SHELL\|presetOf\|shapeAccepts" lib/activate.js
 grep -n "withRtkPath\|shellQuote" lib/shadow.js
 grep -n "createRtkManager\|function " lib/sidecar.js
 ```
+
+## 9. 落地结果（2026-11-12，`refactor/consolidate-patches`）
+
+§7 的残余项里，与本次重构直接相关的部分已处理：
+
+| 项 | 落地方式 | 提交 |
+|---|---|---|
+| 子进程/中止/错误文本重复 | 新建 `lib/proc.js`（73 行），四个模块改为 import | `2bf5660` |
+| 预设 shell 形状 / PATH 覆盖层 / 提示 / 配置默认值 | 新建 `lib/shell.js`（139 行）与 `lib/config.js`（98 行）；`activate.js` 487→418，`shadow.js` 145→119，`awareness.js` 退回纯文本，`index.js` 98→83 | `5b65525` |
+| 安装器单体 | 新建 `lib/fsx.js`（128 行）与 `lib/store.js`（261 行）；`sidecar.js` 744→675，只保留来源解析/安装器/调度；`sidecar` 的配置 clamp 改为消费 `config.js` | `9ed294e` + 集成提交 |
+| rewrite 协议 / status payload | `interpretRewrite()`、`buildStatusPayload()`、`readRuntimeSafe()`、`resolveRequestRejection()` 成为可单测纯函数；`client.js` 仅机械去重 | `80e91ec` |
+| 文档同步（§7.1） | `HANDOFF.md` §1/§4/§6/§7 已更新；新增 `docs/ARCHITECTURE.md`；两份 README 的架构图与链接已同步 | 文档提交 |
+| 测试计数漂移（§7.2） | `node --test test/*.test.mjs` → **175/175** 通过（原 108），HANDOFF §1/§6 已回写 | 同上 |
+| abort code 决策（§7.4） | 工具调用取消保持 `code = 'ABORTED'`，进程/安装取消用 `ABORT_ERR`；写入 HANDOFF §7.17 | 同上 |
+
+§7 其余项（CI/remote、npm 发布、Windows/pwsh、`$DSH_RTK_BIN`、status 健康投影边界、
+真实 `$DSH_HOME` 安装冒烟）仍留作后续，未在本分支处理。
