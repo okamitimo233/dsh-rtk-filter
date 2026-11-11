@@ -296,8 +296,11 @@ apply
 16. **awareness 里写明 command-only shell 没有 `workdir`**
     - 极简模式的 bash 只声明 `command`，`workdir`/`timeoutMs` 会被静默丢弃（实测：
       传了不报错、也不生效），agent 容易误判“目录没切过去”。
-    - `lib/awareness.js` 末尾补了一句：只有 `command` 时用命令内的 `cd /path && ...`，
-      该 shell 会把目录留到后续调用。
+    - 这句提示只对“镜像的 bash 只有 `command`”的 agent 生效：以同名 section
+      （`rtk:command-output`）注册在 `agent.ctx.systemPrompt` 上，按 scope 遮蔽全局那段，
+      所以标准模式会话看不到它。
+    - 生命周期跟随影子：安装时（或 prompt 就绪后）加上，`drop()`、preset 切换、agent
+      销毁时移除；`awareness: false` 时全局段不出现，局部段也不加。
 
 ## 8. 运维操作
 

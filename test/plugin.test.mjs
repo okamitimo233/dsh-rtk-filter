@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { activate } from '../lib/activate.js'
-import { awarenessText } from '../lib/awareness.js'
+import { awarenessText, awarenessTextWithShell } from '../lib/awareness.js'
 import { aggregateGain, STATUS_PATH } from '../lib/status.js'
 
 const originalBin = process.env.RTK_BIN
@@ -17,10 +17,21 @@ afterEach(() => {
 
 function makeAgent(id, agentPreset) {
   const registrations = []
+  const sections = []
   const agent = {
     id,
     registrations,
+    sections,
     ctx: {
+      systemPrompt: {
+        section(section) {
+          sections.push(section)
+          return () => {
+            const index = sections.indexOf(section)
+            if (index !== -1) sections.splice(index, 1)
+          }
+        },
+      },
       tools: {
         register(definition) {
           registrations.push(definition)
@@ -245,9 +256,9 @@ test('registers the awareness section and an agent-scoped bash shadow', async ()
   assert.equal(section.order, 1001)
   assert.equal(section.text, awarenessText)
   assert.match(section.text, /RTK/)
-  // A command-only shell has no `workdir`; the note has to say so, because a
-  // silently dropped `workdir` reads as a broken tool.
-  assert.match(section.text, /cd \/path/)
+  // The command-only caveat is per-agent: a standard session has `workdir` and
+  // must not be told otherwise.
+  assert.doesNotMatch(section.text, /cd \/path/)
 
   assert.equal(harness.settings[0].binary, 'rtk')
   assert.equal(harness.shadowCalls.length, 1)
@@ -519,6 +530,44 @@ test('the minimal preset filters its own persistent bash', async () => {
   assert.equal(agent.registrations.length, 1)
   assert.equal(harness.shadowCalls.length, 1)
   assert.equal(harness.shadowCalls[0].getBase().description, 'Run commands in a bash shell')
+})
+
+test('the persistent-shell note is scoped to the agent whose bash is command-only', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(harness.sections.length, 1)
+  assert.equal(harness.sections[0].text, awarenessText)
+  assert.equal(agent.sections.length, 1)
+  assert.equal(agent.sections[0].name, 'rtk:command-output')
+  assert.equal(agent.sections[0].text, awarenessTextWithShell)
+  assert.match(agent.sections[0].text, /cd \/path/)
+})
+
+test('a standard bash gets no persistent-shell note', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.sections.length, 1)
+  assert.equal(harness.ctx.agents.list()[0].sections.length, 0)
+})
+
+test('a preset switch away from the persistent shell removes the note', async () => {
+  const presets = makePresets('minimal')
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], {
+    bash: persistentBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.sections.length, 1)
+
+  harness.setBash(standardBash())
+  presets.state.preset = 'standard'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  assert.equal(agent.sections.length, 0)
+  assert.equal(agent.registrations.length, 1)
 })
 
 test('the standard preset keeps filtering its standard bash', async () => {
