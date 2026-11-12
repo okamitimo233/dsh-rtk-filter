@@ -48,8 +48,8 @@ semantics:
 ## Dependency rules
 
 1. **Leaves import nothing from `lib/`.** `proc.js`, `version.js`, and
-   `awareness.js` are leaves. `fsx.js` and `tar.js` depend only on Node
-   built-ins (plus `proc.js` for error text).
+   `awareness.js` are leaves. `fsx.js` depends only on Node built-ins;
+   `tar.js` depends only on Node built-ins plus `proc.js` for error text.
 2. **`activate.js` does no process or file IO.** It composes `sidecar.js`,
    `shell.js`, `shadow.js`, and `status.js`; the manager owns everything that
    touches the network or the cache.

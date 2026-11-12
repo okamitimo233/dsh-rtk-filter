@@ -3,7 +3,7 @@
 > 交接时间：2026-11-12
 > 仓库：`/home/plana/Repos/dsh-rtk-filter`
 > 目标宿主：DeepSeek Harness（DSH）`web` profile
-> 当前分支：`refactor/consolidate-patches`（领先 `main` 7 个提交，尚未合并）
+> 当前分支：`refactor/consolidate-patches`
 
 ## 1. 当前状态
 
@@ -16,7 +16,7 @@
   不再需要全局安装。系统 `PATH` 上的 `rtk` 只作为下载期间的临时回退。
 - 上游 RTK 仓库 `/home/plana/Repos/rtk` 保持冻结（HEAD `08a261a0`），
   **不要再改动**。
-- 测试：`node --test test/*.test.mjs` → 175/175 通过（2026-11-12）。
+- 测试：`node --test test/*.test.mjs` → 178/178 通过（2026-11-12）。
 - 从 checkout 链接安装时没有 Config schema，但 row 的原始 `config` 仍会传到
   `apply`；详见 README。
 
@@ -44,8 +44,7 @@
 
 ## 4. 下一步
 
-- 配置 remote 并推送；补 CI（`node --test`）。
-- 将 `refactor/consolidate-patches` 合并到 `main`。
+- 补 CI（`node --test`）。
 - 若发布为 npm 包并复制进 profile，验证 Config schema 是否恢复可用。
 - 可选：Windows 支持、安装失败退避、通过 `ctx.shellEnv` 暴露 `$DSH_RTK_BIN`。
 
