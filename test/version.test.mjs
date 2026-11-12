@@ -35,6 +35,13 @@ test('compares versions numerically', () => {
   assert.equal(compareVersions(null, version(1, 0, 0)), 0)
 })
 
+test('rejects version-like objects with non-integer parts', () => {
+  assert.equal(compareVersions({ major: 1.5, minor: 0, patch: 0 }, { major: 1, minor: 0, patch: 0 }), 0)
+  assert.equal(compareVersions({ major: '1', minor: 0, patch: 0 }, { major: 1, minor: 0, patch: 0 }), 0)
+  assert.equal(formatVersion({ major: 1, minor: Number.NaN, patch: 0 }), undefined)
+  assert.equal(isSupportedVersion({ major: 1, minor: 0 }), false)
+})
+
 test('the rewrite protocol needs 0.23.0 or newer', () => {
   const version = (major, minor, patch) => ({ major, minor, patch })
   assert.equal(isSupportedVersion(version(0, 22, 0)), false)

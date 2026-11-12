@@ -157,6 +157,26 @@ test('an abort defaults to the tool-call ABORTED code', async () => {
   )
 })
 
+test('a non-abort rewrite failure is rethrown', async () => {
+  const failure = new Error('rewrite crashed')
+  const harness = makeHarness({ onRewrite: () => { throw failure } })
+  await assert.rejects(
+    harness.shadow.execute({ command: 'git status', description: 'Status' }, {}),
+    (error) => error === failure,
+  )
+  assert.equal(harness.calls.length, 0)
+})
+
+test('a rewrite that is empty or unchanged passes the original through', async () => {
+  const empty = makeHarness({ outcome: { kind: 'rewrite', command: '  ' } })
+  await empty.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(empty.calls[0].args.command, 'git status')
+
+  const unchanged = makeHarness({ outcome: { kind: 'rewrite', command: 'git status' } })
+  await unchanged.shadow.execute({ command: 'git status', description: 'Status' }, {})
+  assert.equal(unchanged.calls[0].args.command, 'git status')
+})
+
 test('a missing inherited bash tool fails visibly', async () => {
   const harness = makeHarness({ hasBase: false })
   await assert.rejects(

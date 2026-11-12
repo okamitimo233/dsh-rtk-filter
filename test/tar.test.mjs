@@ -95,3 +95,97 @@ test('rejects a non-gzip payload', () => {
     (error) => error instanceof TarError && error.code === 'GZIP',
   )
 })
+
+const BLOCK = 512
+
+/** Rewrite header bytes 148..155 with a checksum that matches `header`. */
+function repairChecksum(header, { signed = false } = {}) {
+  header.fill(0x20, 148, 156)
+  let sum = 0
+  for (const byte of header) sum += signed && byte > 0x7f ? byte - 0x100 : byte
+  header.write(`${sum.toString(8).padStart(6, '0')}\0 `, 148, 'ascii')
+}
+
+test('rejects a base-256 numeric header field', () => {
+  const raw = tarBuffer([{ name: 'rtk', data: 'x' }])
+  raw[124] = 0x80
+  repairChecksum(raw.subarray(0, BLOCK))
+  assert.throws(
+    () => extractFromTarGz(gzipSync(raw), ['rtk']),
+    (error) => error instanceof TarError && error.code === 'UNSUPPORTED',
+  )
+})
+
+test('rejects a non-octal numeric header field', () => {
+  const raw = tarBuffer([{ name: 'rtk', data: 'x' }])
+  raw.write('abc\0', 124, 'ascii')
+  repairChecksum(raw.subarray(0, BLOCK))
+  assert.throws(
+    () => extractFromTarGz(gzipSync(raw), ['rtk']),
+    (error) => error instanceof TarError && error.code === 'FORMAT',
+  )
+})
+
+test('treats an empty numeric field as zero', () => {
+  const raw = tarBuffer([{ name: 'rtk', data: '' }])
+  raw.fill(0, 124, 136)
+  repairChecksum(raw.subarray(0, BLOCK))
+  const files = extractFromTarGz(gzipSync(raw), ['rtk'])
+  assert.equal(files.get('rtk').length, 0)
+})
+
+test('accepts a signed header checksum', () => {
+  const name = `${'a'.repeat(90)}é`
+  const raw = tarBuffer([{ name, data: 'binary' }])
+  repairChecksum(raw.subarray(0, BLOCK), { signed: true })
+  assert.equal(extractFromTarGz(gzipSync(raw), [name]).get(name).toString(), 'binary')
+})
+
+test('reads a name field without a NUL terminator', () => {
+  const name = 'a'.repeat(100)
+  const archive = tarGz([{ name, data: 'binary' }])
+  assert.equal(extractFromTarGz(archive, [name]).get(name).toString(), 'binary')
+})
+
+test('strips leading ./ from entry names', () => {
+  const archive = tarGz([{ name: './rtk', data: 'binary' }])
+  assert.equal(extractFromTarGz(archive, ['rtk']).get('rtk').toString(), 'binary')
+})
+
+test('rejects an entry with an empty name', () => {
+  assert.throws(
+    () => extractFromTarGz(tarGz([{ name: '', data: 'x' }]), ['rtk']),
+    (error) => error instanceof TarError && error.code === 'FORMAT',
+  )
+})
+
+test('treats a NUL type byte as a regular file', () => {
+  const archive = tarGz([{ name: 'rtk', type: '\0', data: 'binary' }])
+  assert.equal(extractFromTarGz(archive, ['rtk']).get('rtk').toString(), 'binary')
+})
+
+test('rejects GNU long-name entries', () => {
+  assert.throws(
+    () => extractFromTarGz(tarGz([{ name: 'longname', type: 'L', data: 'x' }]), ['rtk']),
+    (error) => error instanceof TarError && error.code === 'UNSUPPORTED',
+  )
+})
+
+test('rejects an archive with too many entries', () => {
+  const archive = tarGz([
+    { name: 'a', data: '1' },
+    { name: 'b', data: '2' },
+  ])
+  assert.throws(
+    () => extractFromTarGz(archive, ['a'], { maxEntries: 1 }),
+    (error) => error instanceof TarError && error.code === 'TOO_LARGE',
+  )
+})
+
+test('rejects an archive that expands beyond the output cap', () => {
+  const archive = tarGz([{ name: 'rtk', data: 'x'.repeat(100_000) }])
+  assert.throws(
+    () => extractFromTarGz(archive, ['rtk'], { maxOutputBytes: 128 }),
+    (error) => error instanceof TarError && error.code === 'TOO_LARGE',
+  )
+})

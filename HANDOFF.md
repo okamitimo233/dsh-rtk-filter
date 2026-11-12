@@ -16,7 +16,7 @@
   不再需要全局安装。系统 `PATH` 上的 `rtk` 只作为下载期间的临时回退。
 - 上游 RTK 仓库 `/home/plana/Repos/rtk` 保持冻结（HEAD `08a261a0`），
   **不要再改动**。
-- 测试：`node --test test/*.test.mjs` → 178/178 通过（2026-11-12）。
+- 测试：`node --test test/*.test.mjs` → 297/297 通过；`node --test --experimental-test-coverage test/*.test.mjs` → 行/分支/函数 100%（index.js 与 lib，`lib/client.js` 由 VM 沙箱评估，不计入该报告的插桩集合）（2026-11-12）。
 - 从 checkout 链接安装时没有 Config schema，但 row 的原始 `config` 仍会传到
   `apply`；详见 README。
 
@@ -34,13 +34,26 @@
 
 ## 3. 已知限制 / 未验证
 
-- live deny（exit 2）只有单元测试覆盖，尚未用真实 deny 规则做端到端验证。
-- 浏览器页面未做人工视觉验证；只验证了 bundle 在 VM 中注册 slot/字典，
-  以及真实 `rtk gain` 数据聚合。
+已知限制：
+
 - 仅支持 POSIX `bash`；Windows `pwsh` 不支持，托管下载仅覆盖
   Linux/macOS x64/arm64。
 - 审批、session log、`tools.restrict`、首次下载等用户可见限制见
   README「Limitations」。
+
+待完成的验证（2026-11-12 合并后尚未执行）：
+
+- [ ] 用临时 `$DSH_HOME` 跑完整安装冒烟（README「Development」）：解析 latest
+      tag、下载、SHA-256、tar 解压、`--version`、rewrite 冒烟、state 写入。
+- [ ] Host 重新加载链接目录后，在 live 会话确认：仍只有一个 `bash`、schema 未变、
+      `git status` 输出被 RTK 压缩、后台 job 正常。
+- [ ] live deny（exit 2）：构造真实 deny 规则，确认命令不执行且错误文本可见。
+- [ ] Settings 状态页人工视觉验证：7/30 天柱状图、空态、错误态；此前仅在 VM
+      中验证 slot/字典注册，并用真实 `rtk gain` 验证过数据聚合。
+- [ ] 显式/PATH 来源的版本显示：用 `RTK_BIN` 或非默认 `binary` 指向系统 `rtk`，
+      确认状态页显示版本号而不是「版本未知」。
+- [ ] 生成的 Config schema：链接安装没有 schema；需发布 npm 包或复制进 profile 后，
+      确认 `edition` 只接受 `rtk` / `rtk-oss`。
 
 ## 4. 下一步
 
