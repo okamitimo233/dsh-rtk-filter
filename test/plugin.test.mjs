@@ -493,9 +493,10 @@ test('malformed config values fall back to the documented defaults', async () =>
 
 test('the optional Config schema is generated from the shared option table', async () => {
   const { OPTIONS, buildConfigSchema, normalizeConfig } = await import('../lib/config.js')
-  const field = (kind) => {
+  const field = (kind, value) => {
     const builder = {
       kind,
+      value,
       default(value) { builder.defaultValue = value; return builder },
       step(value) { builder.stepValue = value; return builder },
       min(value) { builder.minValue = value; return builder },
@@ -506,6 +507,12 @@ test('the optional Config schema is generated from the shared option table', asy
     boolean: () => field('boolean'),
     string: () => field('string'),
     number: () => field('number'),
+    const: (value) => field('const', value),
+    union: (members) => {
+      const builder = field('union')
+      builder.members = members
+      return builder
+    },
     object: (shape) => ({ shape }),
   }
   const schema = buildConfigSchema(z)
@@ -516,6 +523,10 @@ test('the optional Config schema is generated from the shared option table', asy
     if (option.kind === 'number') {
       assert.equal(builder.stepValue, 1)
       assert.equal(builder.minValue, option.min)
+    }
+    if (option.kind === 'enum') {
+      assert.equal(builder.kind, 'union')
+      assert.deepEqual(builder.members.map((member) => member.value), option.values)
     }
   }
   assert.deepEqual(Object.keys(normalizeConfig(undefined)), OPTIONS.map((option) => option.key))
