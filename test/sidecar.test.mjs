@@ -146,6 +146,7 @@ test('installs the latest release into the plugin cache', async () => {
     const current = manager.current()
     assert.equal(current.source, 'managed')
     assert.equal(current.versionText, '1.2.0')
+    assert.equal(current.tag, 'v1.2.0')
     assert.equal(current.prefixDir, join(root, VERSIONS, '1.2.0'))
     assert.equal(existsSync(current.binary), true)
     assert.equal((await probeRtk({ binary: current.binary })).ok, true)
@@ -182,9 +183,11 @@ test('uses PATH when autoInstall is disabled and no managed copy exists', async 
       settings: { autoInstall: false, autoUpdate: false },
     })
     assert.equal(manager.initial.source, 'path')
+    assert.equal(manager.initial.versionText, '0.49.0')
     assert.equal(manager.canWrap, true)
     assert.equal(await manager.start().ready, true)
     assert.equal(manager.current().binary, 'rtk')
+    assert.equal(manager.current().versionText, '0.49.0')
     assert.equal(release.calls.length, 0)
     manager.dispose()
   } finally {
@@ -236,9 +239,40 @@ test('prefers a managed copy over PATH and does not refetch it', async () => {
       settings: { autoUpdate: false },
     })
     assert.equal(manager.initial.source, 'managed')
+    assert.equal(manager.initial.versionText, '1.2.0')
+    assert.equal(manager.initial.tag, 'v1.2.0')
     assert.equal(await manager.start().ready, true)
     assert.equal(manager.current().source, 'managed')
     assert.equal(fetched, 0)
+    manager.dispose()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('re-adopts an intact version directory after its state file disappears', async () => {
+  const root = tempRoot()
+  try {
+    const first = await managerFor({ root, release: makeRelease(), settings: { autoUpdate: false } })
+    await first.manager.start().ready
+    first.manager.dispose()
+
+    rmSync(join(root, STATE), { force: true })
+    const { manager } = await managerFor({
+      root,
+      release: {
+        calls: [],
+        fetchImpl: async () => {
+          throw new Error('the adopted copy should not be downloaded again')
+        },
+      },
+      settings: { autoUpdate: false },
+    })
+    assert.equal(manager.initial.source, 'managed')
+    assert.equal(manager.initial.versionText, '1.2.0')
+    assert.equal(manager.initial.tag, 'v1.2.0')
+    assert.equal(await manager.start().ready, true)
+    assert.equal(existsSync(join(root, STATE)), true)
     manager.dispose()
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -334,6 +368,7 @@ test('an explicit binary is used without a download', async () => {
     const { manager } = await managerFor({ root, settings: { binary: bin } })
     assert.equal(manager.initial.source, 'explicit')
     assert.equal(manager.initial.binary, bin)
+    assert.equal(manager.initial.versionText, '0.49.0')
     assert.equal(manager.initial.prefixDir, join(bin, '..'))
     assert.equal(await manager.start().ready, true)
     assert.equal(manager.current().binary, bin)

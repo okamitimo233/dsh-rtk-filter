@@ -35,6 +35,7 @@ import {
   entryFromState,
   layoutFor,
   listVersions,
+  makeEntry,
   readLatest,
   readState,
   writeLatest,
@@ -250,6 +251,37 @@ test('entryFromState renders the manager view of a state record', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+
+test('makeEntry is the shared manager view and includes a tag only when provided', () => {
+  const managed = makeEntry({
+    binary: '/cache/versions/rtk/1.2.0/rtk',
+    source: 'managed',
+    version: { major: 1, minor: 2, patch: 0, raw: '1.2.0' },
+    tag: 'v1.2.0',
+  })
+  assert.deepEqual(managed, {
+    binary: '/cache/versions/rtk/1.2.0/rtk',
+    prefixDir: '/cache/versions/rtk/1.2.0',
+    source: 'managed',
+    version: { major: 1, minor: 2, patch: 0, raw: '1.2.0' },
+    versionText: '1.2.0',
+    tag: 'v1.2.0',
+  })
+
+  const explicit = makeEntry({
+    binary: '/opt/rtk',
+    source: 'explicit',
+    version: { major: 0, minor: 49, patch: 0, raw: '0.49.0' },
+  })
+  assert.equal(explicit.prefixDir, '/opt')
+  assert.equal(explicit.versionText, '0.49.0')
+  assert.equal('tag' in explicit, false)
+
+  const pathEntry = makeEntry({ binary: 'rtk', source: 'path', version: null })
+  assert.equal(pathEntry.prefixDir, undefined)
+  assert.equal(pathEntry.versionText, undefined)
+  assert.equal('tag' in pathEntry, false)
 })
 
 test('listVersions returns supported versions with a runnable binary, newest first', async () => {
