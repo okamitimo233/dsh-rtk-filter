@@ -9,6 +9,7 @@ import {
   buildStatusPayload,
   dayKeys,
   normalizeDays,
+  projectRuntime,
   readGainStatus,
   readRuntimeSafe,
   registerStatusRoute,
@@ -344,6 +345,34 @@ test('readRuntimeSafe falls back when the provider throws', () => {
   const ready = { state: 'ready', version: '1.2.0', source: 'managed' }
   assert.deepEqual(readRuntimeSafe(() => ready), ready)
   assert.deepEqual(readRuntimeSafe(() => { throw new Error('runtime down') }), {
+    state: 'unavailable',
+    version: null,
+    source: null,
+  })
+})
+
+test('projectRuntime maps manager state to the page badge', () => {
+  assert.deepEqual(projectRuntime({ available: true, canWrap: true, version: '1.2.0', source: 'managed' }), {
+    state: 'ready',
+    version: '1.2.0',
+    source: 'managed',
+  })
+  assert.deepEqual(projectRuntime({ available: true }), {
+    state: 'ready',
+    version: null,
+    source: null,
+  })
+  assert.deepEqual(projectRuntime({ available: false, canWrap: true, version: '1.2.0', source: 'managed' }), {
+    state: 'installing',
+    version: null,
+    source: null,
+  })
+  assert.deepEqual(projectRuntime({ available: false, canWrap: false }), {
+    state: 'unavailable',
+    version: null,
+    source: null,
+  })
+  assert.deepEqual(projectRuntime(), {
     state: 'unavailable',
     version: null,
     source: null,
