@@ -5,12 +5,9 @@ import { execFileSync } from 'node:child_process'
 import { awarenessText, shellOnlyNote } from '../lib/awareness.js'
 import {
   acceptsPresetShell,
-  COMMAND_ONLY,
   composeAwareness,
-  CUSTOM,
   deriveShellProfile,
   describeShellProfile,
-  STANDARD,
   withRtkPath,
 } from '../lib/shell.js'
 
@@ -46,7 +43,7 @@ function standardBash() {
 
 test('derives the command-only profile of a persistent shell', () => {
   const profile = deriveShellProfile(persistentBash())
-  assert.equal(profile.kind, COMMAND_ONLY)
+  assert.equal(profile.commandOnly, true)
   assert.deepEqual(profile.required, ['command'])
   assert.deepEqual(profile.properties, ['command'])
   assert.equal(profile.description, 'Run commands in a bash shell')
@@ -54,18 +51,18 @@ test('derives the command-only profile of a persistent shell', () => {
 
 test('derives the standard profile of a one-shot shell', () => {
   const profile = deriveShellProfile(standardBash())
-  assert.equal(profile.kind, STANDARD)
+  assert.equal(profile.commandOnly, false)
   assert.deepEqual(profile.required, ['description', 'command'])
   assert.deepEqual(profile.properties, ['description', 'command', 'workdir'])
 })
 
 test('derives a custom profile for a shape this plugin does not know', () => {
   const empty = deriveShellProfile({ description: 'no parameters' })
-  assert.equal(empty.kind, CUSTOM)
+  assert.equal(empty.commandOnly, false)
   assert.deepEqual(empty.required, [])
   assert.deepEqual(empty.properties, [])
 
-  assert.equal(deriveShellProfile(undefined).kind, CUSTOM)
+  assert.equal(deriveShellProfile(undefined).commandOnly, false)
 
   const truncated = deriveShellProfile({ description: 'x'.repeat(100) })
   assert.equal(truncated.description.length, 40)
