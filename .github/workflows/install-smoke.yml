@@ -1,0 +1,23 @@
+name: RTK install smoke
+
+# Downloads the real RTK release from GitHub, so it is manual (or scheduled by
+# a maintainer) rather than part of every push. The unit suite never needs the
+# network; this workflow proves the release pipeline end to end.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install into a temporary DSH_HOME
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+      - name: Run the install smoke
+        run: npm run smoke
