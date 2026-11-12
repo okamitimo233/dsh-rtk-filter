@@ -47,9 +47,12 @@ flowchart TB
 
     subgraph Plugin["dsh-rtk-filter"]
         Activate["activate()<br/>lib/activate.js"]
+        Config["选项表<br/>lib/config.js"]
+        Shell["preset-shell 模型<br/>lib/shell.js"]
         Shadow["agent 作用域 bash 影子<br/>lib/shadow.js"]
-        Rewrite["rewrite 客户端<br/>lib/rewrite.js"]
+        Rewrite["rewrite 协议<br/>lib/rewrite.js"]
         Manager["托管 RTK 生命周期<br/>lib/sidecar.js"]
+        Store["缓存状态 · 锁<br/>lib/store.js · lib/fsx.js"]
         Prompt["system prompt 提示<br/>lib/awareness.js"]
         Status["状态路由<br/>lib/status.js"]
     end
@@ -68,14 +71,20 @@ flowchart TB
     Shadow -->|"委托"| Base -->|"运行 rtk CMD"| RTK
 
     Activate -.->|"注册"| Shadow
+    Activate -.->|"shell 策略"| Shell
+    Activate -.->|"与配置归一化"| Config
     Activate -.-> Prompt
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"二进制 + PATH 前缀"| Shadow
+    Manager -.->|"state · 锁 · GC"| Store
     Manager -.->|"下载 / 校验"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
+
+共享辅助模块：`lib/proc.js`（子进程、abort 契约、错误文本）同时被过滤路径与安装器使用。
+完整的模块地图、依赖规则与“唯一来源”清单见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 环境要求
 
@@ -251,9 +260,16 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
   都不禁用 `bash`。
 - **平台**：仅 POSIX `bash`；Windows 的 `pwsh` 工具不会被过滤。托管下载支持 Linux 和
   macOS 的 x64 与 arm64。
-- **继承的定义**：插件在为其 agent 安装时捕获该 agent 的 `bash` 定义。若某个 preset
-  在实时会话中重新注册了 schema 不同的 `bash`，在插件重载之前不会重新镜像
-  （stock Web preset 在 agent 启动前就已一次性组装 `bash`）。
+- **继承的定义**：插件在为其 agent 安装时捕获该 agent 的 `bash` 定义。影子一旦占住
+  `bash` 名字，agent 自己的查找只会返回影子，因此之后的上游替换在 `tools/change` 里
+  看不见；切换 preset 时插件会丢弃旧影子并重新捕获，再由形状守卫决定新 bash 能否被镜像。
+  “当前 preset”取自注册表投影（`presetForSession`），而不是创建时的 header：Web 端先用
+  registry 默认 preset 建会话、随后才选中用户的 preset，所以切换过的会话 header 记的是
+  它出生时的那个。
+- **preset 形状守卫**：极简模式（`minimal`）的 bash 只接受 `command`。若捕获到的 `bash`
+  声明了其它参数（例如标准 `dsh-tool-bash` 的 `description`/`workdir`），插件判定这份
+  定义不属于该 preset，宁可不安装、不过滤，也不改变工具 schema 与执行语义。未登记的
+  preset 不受影响。
 - **托管二进制的范围**：插件自有的 RTK 只出现在它委托的 bash 调用的 `PATH` 中，不在
   用户终端或其他 DSH 进程里。系统 `rtk` 不会被插件更新；显式 `binary`/`RTK_BIN`
   永远不会被托管。
@@ -296,4 +312,6 @@ manager.dispose()
 
 ## Handoff
 
-实现历史、运维说明、验证记录和已知坑点见 [HANDOFF.md](HANDOFF.md)。
+当前交接状态、运维速查和下一步见 [HANDOFF.md](HANDOFF.md)。模块边界、约束与坑点见
+[ARCHITECTURE.md](docs/ARCHITECTURE.md)；重构动机与提交考古见
+[COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md)。

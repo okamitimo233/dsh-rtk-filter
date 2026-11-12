@@ -2,7 +2,7 @@ import { test, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { activate } from '../lib/activate.js'
-import { awarenessText } from '../lib/awareness.js'
+import { awarenessText, shellOnlyNote } from '../lib/awareness.js'
 import { aggregateGain, STATUS_PATH } from '../lib/status.js'
 
 const originalBin = process.env.RTK_BIN
@@ -15,21 +15,70 @@ afterEach(() => {
   else process.env.RTK_DISABLED = originalDisabled
 })
 
-function makeAgent(id) {
+function makeAgent(id, agentPreset) {
   const registrations = []
-  return {
+  const sections = []
+  const agent = {
     id,
     registrations,
+    sections,
     ctx: {
+      systemPrompt: {
+        section(section) {
+          sections.push(section)
+          return () => {
+            const index = sections.indexOf(section)
+            if (index !== -1) sections.splice(index, 1)
+          }
+        },
+      },
       tools: {
         register(definition) {
           registrations.push(definition)
           return () => {
-            registrations.splice(registrations.indexOf(definition), 1)
+            const index = registrations.indexOf(definition)
+            if (index !== -1) registrations.splice(index, 1)
           }
         },
       },
     },
+  }
+  agent.session = { id, header: {} }
+  if (agentPreset !== undefined) agent.session.header.agentPreset = agentPreset
+  return agent
+}
+
+/** The persistent bash the `minimal` preset composes: only `command`. */
+function persistentBash() {
+  return {
+    name: 'bash',
+    description: 'Run commands in a bash shell',
+    parameters: {
+      type: 'object',
+      properties: { command: { type: 'string' } },
+      required: ['command'],
+    },
+    output: { schema: { type: 'string' }, render: () => [] },
+    async execute() { return 'persistent' },
+  }
+}
+
+/** The one-shot bash the `standard` preset composes: `description` required. */
+function standardBash() {
+  return {
+    name: 'bash',
+    description: 'Execute a bash command',
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string' },
+        command: { type: 'string' },
+        workdir: { type: 'string' },
+      },
+      required: ['description', 'command'],
+    },
+    output: { schema: { type: 'string' }, render: () => [] },
+    async execute() { return 'standard' },
   }
 }
 
@@ -90,19 +139,22 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
   const settings = []
   const services = options.services ?? {}
 
+  let visibleBash = options.bash ?? {
+    name: 'bash',
+    description: 'inherited bash',
+    parameters: { type: 'object', properties: {} },
+    output: { schema: { type: 'string' }, render: () => [] },
+    async execute() { return 'bash' },
+  }
+
   const ctx = {
     tools: {
       get(name, scope) {
         // Mimic the Web surface: the built-in bash tool lives in the agent
-        // preset realm, so the unscoped global lookup does not see it.
+        // preset realm, so the unscoped global lookup does not see it, and a
+        // registered shadow takes the name over from what it mirrors.
         if (name !== 'bash' || scope === undefined) return undefined
-        return {
-          name: 'bash',
-          description: 'inherited bash',
-          parameters: { type: 'object', properties: {} },
-          output: { schema: { type: 'string' }, render: () => [] },
-          async execute() { return 'bash' },
-        }
+        return scope.registrations?.at(-1) ?? visibleBash
       },
     },
     agents: { list: () => agents },
@@ -173,6 +225,18 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
     setManager(manager) {
       managerForHarness = manager
     },
+    setBash(next) {
+      visibleBash = next
+    },
+  }
+}
+
+/** A registry stand-in whose committed selection the test can advance. */
+function makePresets(initial) {
+  const state = { preset: initial }
+  return {
+    state,
+    service: { presetForSession: () => state.preset },
   }
 }
 
@@ -192,6 +256,9 @@ test('registers the awareness section and an agent-scoped bash shadow', async ()
   assert.equal(section.order, 1001)
   assert.equal(section.text, awarenessText)
   assert.match(section.text, /RTK/)
+  // The command-only caveat is per-agent: a standard session has `workdir` and
+  // must not be told otherwise.
+  assert.doesNotMatch(section.text, /cd \/path/)
 
   assert.equal(harness.settings[0].binary, 'rtk')
   assert.equal(harness.shadowCalls.length, 1)
@@ -399,6 +466,72 @@ test('explicit config reaches the manager unchanged', async () => {
   assert.equal(settings.downloadTimeoutMs, 5_000)
 })
 
+test('malformed config values fall back to the documented defaults', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, {
+    enabled: 0,
+    awareness: 1,
+    binary: '   ',
+    rewriteTimeoutMs: 0,
+    logRewrites: 'yes',
+    version: '',
+    edition: 'unknown-edition',
+    updateIntervalMs: 59_999,
+    downloadTimeoutMs: Number.NaN,
+  }, makeManager().manager)
+  const settings = harness.settings[0]
+  assert.equal(settings.enabled, true)
+  assert.equal(settings.awareness, true)
+  assert.equal(settings.binary, 'rtk')
+  assert.equal(settings.rewriteTimeoutMs, 2000)
+  assert.equal(settings.logRewrites, false)
+  assert.equal(settings.version, 'latest')
+  assert.equal(settings.edition, 'rtk')
+  assert.equal(settings.updateIntervalMs, 86_400_000)
+  assert.equal(settings.downloadTimeoutMs, 120_000)
+})
+
+test('the optional Config schema is generated from the shared option table', async () => {
+  const { OPTIONS, buildConfigSchema, normalizeConfig } = await import('../lib/config.js')
+  const field = (kind, value) => {
+    const builder = {
+      kind,
+      value,
+      default(value) { builder.defaultValue = value; return builder },
+      step(value) { builder.stepValue = value; return builder },
+      min(value) { builder.minValue = value; return builder },
+    }
+    return builder
+  }
+  const z = {
+    boolean: () => field('boolean'),
+    string: () => field('string'),
+    number: () => field('number'),
+    const: (value) => field('const', value),
+    union: (members) => {
+      const builder = field('union')
+      builder.members = members
+      return builder
+    },
+    object: (shape) => ({ shape }),
+  }
+  const schema = buildConfigSchema(z)
+  assert.deepEqual(Object.keys(schema.shape), OPTIONS.map((option) => option.key))
+  for (const option of OPTIONS) {
+    const builder = schema.shape[option.key]
+    assert.equal(builder.defaultValue, option.default)
+    if (option.kind === 'number') {
+      assert.equal(builder.stepValue, 1)
+      assert.equal(builder.minValue, option.min)
+    }
+    if (option.kind === 'enum') {
+      assert.equal(builder.kind, 'union')
+      assert.deepEqual(builder.members.map((member) => member.value), option.values)
+    }
+  }
+  assert.deepEqual(Object.keys(normalizeConfig(undefined)), OPTIONS.map((option) => option.key))
+})
+
 test('registers a status route when the web server is present', async () => {
   const routes = []
   const webServer = {
@@ -444,4 +577,139 @@ test('registers a status route when the web server is present', async () => {
   assert.equal(payload.runtime.version, '1.2.0')
   assert.equal(payload.summary.calls, 4)
   assert.equal(payload.summary.savedTokens, 300)
+})
+
+test('the minimal preset leaves a standard-shaped bash unfiltered', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 0)
+  assert.equal(harness.shadowCalls.length, 0)
+  assert.match(harness.infos.join('\n'), /leaving the minimal preset's bash unfiltered/)
+})
+
+test('the minimal preset filters its own persistent bash', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 1)
+  assert.equal(harness.shadowCalls[0].getBase().description, 'Run commands in a bash shell')
+})
+
+test('the persistent-shell note is scoped to the agent whose bash is command-only', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(harness.sections.length, 1)
+  assert.equal(harness.sections[0].text, awarenessText)
+  assert.equal(agent.sections.length, 1)
+  assert.equal(agent.sections[0].name, 'rtk:command-output')
+  assert.equal(agent.sections[0].text, `${awarenessText} ${shellOnlyNote}`)
+  assert.match(agent.sections[0].text, /cd \/path/)
+})
+
+test('a standard bash gets no persistent-shell note', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.sections.length, 1)
+  assert.equal(harness.ctx.agents.list()[0].sections.length, 0)
+})
+
+test('a preset switch away from the persistent shell removes the note', async () => {
+  const presets = makePresets('minimal')
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], {
+    bash: persistentBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.sections.length, 1)
+
+  harness.setBash(standardBash())
+  presets.state.preset = 'standard'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  assert.equal(agent.sections.length, 0)
+  assert.equal(agent.registrations.length, 1)
+})
+
+test('the standard preset keeps filtering its standard bash', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 1)
+})
+
+test('a preset bash that mounts late is picked up on tools/change', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 0)
+
+  harness.setBash(persistentBash())
+  harness.handlers.get('tools/change')()
+
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 1)
+  assert.equal(harness.shadowCalls[0].getBase().description, 'Run commands in a bash shell')
+})
+
+test('a preset switch re-captures the bash the new composition mounts', async () => {
+  const presets = makePresets('standard')
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls[0].getBase().description, 'Execute a bash command')
+
+  // The registry recomposes the agent first and appends the selection after.
+  harness.setBash(persistentBash())
+  presets.state.preset = 'minimal'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 2)
+  assert.equal(harness.shadowCalls[1].getBase().description, 'Run commands in a bash shell')
+})
+
+test('a switch to minimal drops a shadow captured under the previous preset', async () => {
+  const presets = makePresets('ops-ptc')
+  const harness = makeCtx([makeAgent('agent-1', 'ops-ptc')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 1)
+
+  presets.state.preset = 'minimal'
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+
+  // The standard bash is still the only one visible: leave it unfiltered rather
+  // than keep mirroring a shape the minimal preset never composes.
+  assert.equal(agent.registrations.length, 0)
+  assert.equal(harness.shadowCalls.length, 1)
+  assert.match(harness.infos.join('\n'), /leaving the minimal preset's bash unfiltered/)
+})
+
+test('a selection event for another session leaves this agent alone', async () => {
+  const presets = makePresets('standard')
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+
+  harness.handlers.get('agent-preset/selected')('session-someone-else')
+
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 1)
 })

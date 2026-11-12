@@ -10,6 +10,8 @@
 import { tmpdir } from 'node:os'
 
 import { activate } from './lib/activate.js'
+import { buildConfigSchema } from './lib/config.js'
+import { abortError } from './lib/proc.js'
 import { probeRtk, rewriteCommand } from './lib/rewrite.js'
 import { createBashShadow } from './lib/shadow.js'
 import { createRtkManager } from './lib/sidecar.js'
@@ -31,19 +33,7 @@ export const inject = ['tools', 'agents', 'systemPrompt']
 export let Config
 try {
   const { default: z } = await import('@deepseek-ai/schemastery')
-  Config = z.object({
-    enabled: z.boolean().default(true),
-    awareness: z.boolean().default(true),
-    binary: z.string().default('rtk'),
-    rewriteTimeoutMs: z.number().step(1).min(1).default(2000),
-    logRewrites: z.boolean().default(false),
-    autoInstall: z.boolean().default(true),
-    autoUpdate: z.boolean().default(true),
-    version: z.string().default('latest'),
-    edition: z.string().default('rtk'),
-    updateIntervalMs: z.number().step(1).min(60000).default(86400000),
-    downloadTimeoutMs: z.number().step(1).min(1000).default(120000),
-  })
+  Config = buildConfigSchema(z)
 } catch {
   Config = undefined
 }
@@ -51,15 +41,10 @@ try {
 /**
  * Cancellation error for a `rtk rewrite` that the caller aborted.
  *
- * A plain error keeps this module free of shipped-package imports. The shared
- * pipeline renders its message like any other tool failure.
+ * The abort contract is shared through `lib/proc.js`; the shared pipeline
+ * renders its message like any other tool failure.
  */
-function toolAborted() {
-  const error = new Error('tool call aborted')
-  error.name = 'AbortError'
-  error.code = 'ABORTED'
-  return error
-}
+const toolAborted = () => abortError('tool call aborted', 'ABORTED')
 
 /**
  * Verify that a freshly downloaded binary still speaks the rewrite protocol.

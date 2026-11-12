@@ -52,9 +52,12 @@ flowchart TB
 
     subgraph Plugin["dsh-rtk-filter"]
         Activate["activate()<br/>lib/activate.js"]
+        Config["option table<br/>lib/config.js"]
+        Shell["preset-shell model<br/>lib/shell.js"]
         Shadow["agent-scoped bash shadow<br/>lib/shadow.js"]
-        Rewrite["rewrite client<br/>lib/rewrite.js"]
+        Rewrite["rewrite protocol<br/>lib/rewrite.js"]
         Manager["managed RTK lifecycle<br/>lib/sidecar.js"]
+        Store["cache state · lock<br/>lib/store.js · lib/fsx.js"]
         Prompt["system-prompt note<br/>lib/awareness.js"]
         Status["status route<br/>lib/status.js"]
     end
@@ -73,14 +76,22 @@ flowchart TB
     Shadow -->|"delegates"| Base -->|"runs rtk CMD"| RTK
 
     Activate -.->|"registers"| Shadow
+    Activate -.->|"shell policy"| Shell
+    Activate -.->|"normalizes with"| Config
     Activate -.-> Prompt
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"binary + PATH prefix"| Shadow
+    Manager -.->|"state · lock · GC"| Store
     Manager -.->|"downloads / verifies"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
+
+Shared helpers: `lib/proc.js` (child process, abort contract, error text) is
+used by both the filter and the installer. The full module map, dependency
+rules, and single-sources-of-truth are in
+[ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
@@ -292,9 +303,20 @@ Additional rules:
 - **Platform**: POSIX `bash` only; the Windows `pwsh` tool is not filtered.
   Managed downloads support Linux and macOS on x64 and arm64.
 - **Inherited definition**: the plugin captures the agent's `bash` definition
-  when it installs for that agent. A preset that re-registers `bash` with a
-  different schema during a live session is not re-mirrored until the plugin
-  reloads (the stock Web preset composes `bash` once, before the agent starts).
+  when it installs for that agent. Once the shadow owns the `bash` name the
+  agent's own lookup returns the shadow, so a later replacement is not visible
+  through `tools/change`; the mirror is re-captured when the agent's preset
+  changes, and the shape guard then decides whether the new bash may be
+  mirrored. The preset in force is read from the registry projection
+  (`presetForSession`), not the creation header: the Web surface creates a
+  session under the registry default and selects the user's preset afterwards,
+  so a switched session's header records the preset it was born with.
+- **Preset shape guard**: the `minimal` preset's bash accepts `command` only.
+  When the captured `bash` declares other parameters (the standard
+  `dsh-tool-bash` declares `description`/`workdir`, for example), the plugin
+  treats that definition as belonging to another plane and installs nothing:
+  it filters less rather than changing the tool's schema and execution
+  semantics. Unlisted presets are unaffected.
 - **Managed binary scope**: the plugin-owned RTK is on `PATH` only inside bash
   calls it delegates, not in the user's terminal or other DSH processes. A
   system `rtk` is not updated by the plugin; explicit `binary`/`RTK_BIN`
@@ -343,4 +365,4 @@ manager.dispose()
 
 ## Handoff
 
-See [HANDOFF.md](HANDOFF.md) for the implementation history, operational notes, verification record, and known pitfalls.
+See [HANDOFF.md](HANDOFF.md) for the current handoff state, operations quick reference, and next steps. [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module boundaries, constraints, and pitfalls; [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains why they exist.
