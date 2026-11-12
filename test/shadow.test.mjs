@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 
 import { createBashShadow } from '../lib/shadow.js'
+import { abortError } from '../lib/proc.js'
 
 const originalDisabled = process.env.RTK_DISABLED
 
@@ -135,6 +136,25 @@ test('an abort surfaces the tool aborted error', async () => {
     (error) => error instanceof Error && error.name === 'AbortError',
   )
   assert.equal(harness.calls.length, 0)
+})
+
+test('an abort defaults to the tool-call ABORTED code', async () => {
+  const shadow = createBashShadow({
+    getBase: () => ({
+      name: 'bash',
+      async execute() {
+        throw new Error('the aborted call must not be delegated')
+      },
+    }),
+    rewrite: async () => {
+      throw abortError('rtk rewrite aborted')
+    },
+  })
+
+  await assert.rejects(
+    shadow.execute({ command: 'git status', description: 'Status' }, {}),
+    (error) => error instanceof Error && error.name === 'AbortError' && error.code === 'ABORTED',
+  )
 })
 
 test('a missing inherited bash tool fails visibly', async () => {
