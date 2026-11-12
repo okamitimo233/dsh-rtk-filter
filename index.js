@@ -30,13 +30,16 @@ export const inject = ['tools', 'agents', 'systemPrompt']
  * raw `config` still reaches `apply` and `lib/activate.js` applies the same
  * defaults; only the generated settings form is unavailable.
  */
-export let Config
-try {
-  const { default: z } = await import('@deepseek-ai/schemastery')
-  Config = buildConfigSchema(z)
-} catch {
-  Config = undefined
+export async function loadConfigSchema(load = () => import('@deepseek-ai/schemastery')) {
+  try {
+    const { default: z } = await load()
+    return buildConfigSchema(z)
+  } catch {
+    return undefined
+  }
 }
+
+export const Config = await loadConfigSchema()
 
 /**
  * Cancellation error for a `rtk rewrite` that the caller aborted.
@@ -44,14 +47,14 @@ try {
  * The abort contract is shared through `lib/proc.js`; the shared pipeline
  * renders its message like any other tool failure.
  */
-const toolAborted = () => abortError('tool call aborted', 'ABORTED')
+export const toolAborted = () => abortError('tool call aborted', 'ABORTED')
 
 /**
  * Verify that a freshly downloaded binary still speaks the rewrite protocol.
  * Try two ubiquitous commands so a project-local deny rule for one of them
  * does not reject an otherwise valid download; at least one must rewrite.
  */
-async function smokeRewrite({ binary, signal }) {
+export async function smokeRewrite({ binary, signal }) {
   const failures = []
   for (const command of ['git status', 'ls']) {
     try {
@@ -63,7 +66,7 @@ async function smokeRewrite({ binary, signal }) {
         signal,
       })
       if (outcome.kind === 'rewrite') return { ok: true }
-      failures.push(`${command}: ${outcome.kind}${outcome.reason ? ` (${outcome.reason})` : ''}`)
+      failures.push(`${command}: ${outcome.kind} (${outcome.reason})`)
     } catch (error) {
       failures.push(`${command}: ${error instanceof Error ? error.message : String(error)}`)
     }

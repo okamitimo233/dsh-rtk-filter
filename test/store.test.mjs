@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs'
@@ -31,6 +32,7 @@ import {
   LOCK_STALE_MS,
   STATE_SCHEMA,
   acquireLock,
+  closeQuietly,
   collectGarbage,
   entryFromState,
   layoutFor,
@@ -39,6 +41,7 @@ import {
   readLatest,
   readState,
   writeLatest,
+  writeLockOwner,
   writeState,
 } from '../lib/store.js'
 
@@ -395,6 +398,117 @@ test('acquireLock breaks an abandoned lock', async () => {
     assert.notEqual(release, undefined)
     assert.equal(readFileSync(layout.lockPath, 'utf8'), String(process.pid) + '\n')
     await release()
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('writeJson removes its temp file when the rename fails', async () => {
+  const root = tempRoot()
+  try {
+    const target = join(root, 'state')
+    mkdirSync(target, { recursive: true })
+    await assert.rejects(writeJson(target, { schema: 1 }))
+    assert.deepEqual(readdirSync(root), ['state'])
+    assert.equal(statSync(target).isDirectory(), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('removeQuietly swallows permission failures', { skip: process.getuid?.() === 0 }, async () => {
+  const root = tempRoot()
+  const locked = join(root, 'locked')
+  try {
+    mkdirSync(locked)
+    writeFileSync(join(locked, 'file'), 'x')
+    chmodSync(locked, 0o500)
+    await removeQuietly(locked)
+    assert.equal(existsSync(locked), true)
+  } finally {
+    chmodSync(locked, 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('collectGarbage tolerates an unreadable temp entry clock', async () => {
+  const root = tempRoot()
+  try {
+    const layout = makeLayout(root)
+    writeBinary(join(layout.versionsDir, '1.2.0', 'rtk'))
+    mkdirSync(join(layout.tmpDir, 'install-pending'), { recursive: true })
+
+    await collectGarbage(layout, '1.2.0', () => {
+      throw new Error('clock unavailable')
+    })
+
+    assert.deepEqual(readdirSync(layout.versionsDir), ['1.2.0'])
+    assert.equal(existsSync(join(layout.tmpDir, 'install-pending')), true)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('readLatest discards a non-string tag and a non-finite timestamp', async () => {
+  const root = tempRoot()
+  try {
+    const layout = makeLayout(root)
+    mkdirSync(dirname(layout.latestPath), { recursive: true })
+    writeFileSync(layout.latestPath, JSON.stringify({ tag: 42, checkedAt: 'soon' }))
+    assert.deepEqual(await readLatest(layout), { tag: undefined, checkedAt: undefined })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('lock helpers tolerate a faulty handle', async () => {
+  await writeLockOwner({
+    async writeFile() {
+      throw new Error('read-only handle')
+    },
+  })
+  await closeQuietly({
+    async close() {
+      throw new Error('already closed')
+    },
+  })
+})
+
+test('acquireLock propagates open failures that are not lock contention', { skip: process.getuid?.() === 0 }, async () => {
+  const root = tempRoot()
+  const layout = makeLayout(root)
+  try {
+    mkdirSync(dirname(layout.lockPath), { recursive: true })
+    chmodSync(dirname(layout.lockPath), 0o500)
+    await assert.rejects(acquireLock(layout, { timeoutMs: 0 }), (error) => error.code === 'EACCES')
+  } finally {
+    chmodSync(dirname(layout.lockPath), 0o700)
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('acquireLock treats a disappearing lock entry as held', async () => {
+  const root = tempRoot()
+  const layout = makeLayout(root)
+  try {
+    mkdirSync(dirname(layout.lockPath), { recursive: true })
+    symlinkSync(join(root, 'missing-lock-target'), layout.lockPath)
+    assert.equal(await acquireLock(layout, { timeoutMs: 0 }), undefined)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('acquireLock falls back to the real wait between attempts', async () => {
+  const root = tempRoot()
+  try {
+    const layout = makeLayout(root)
+    mkdirSync(dirname(layout.lockPath), { recursive: true })
+    writeFileSync(layout.lockPath, 'other process\n')
+
+    const started = Date.now()
+    assert.equal(await acquireLock(layout, { timeoutMs: 50 }), undefined)
+    assert.ok(Date.now() - started >= 150)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

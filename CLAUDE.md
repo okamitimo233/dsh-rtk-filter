@@ -13,8 +13,11 @@ DSH（DeepSeek Harness）插件：把模型调用的 `bash` 命令透明地改�
 仓库零依赖、无构建步骤、无 lint 配置；除 `index.js` 对 schemastery 的一次可选动态导入外，只使用 Node 内置模块。
 
 ```bash
-# 全部单元测试（175 个，使用 fake rtk / 生成的 tar / fake fetch / fake Context）
+# 全部单元测试（297 个，使用 fake rtk / 生成的 tar / fake fetch / fake Context）
 node --test test/*.test.mjs
+
+# 覆盖率（行/分支/函数均为 100%；lib/client.js 由 VM 沙箱评估，不在插桩集合内）
+node --test --experimental-test-coverage test/*.test.mjs
 
 # 单个测试文件
 node --test test/shadow.test.mjs

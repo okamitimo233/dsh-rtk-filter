@@ -25,8 +25,10 @@ function makeAgent(id, agentPreset) {
     ctx: {
       systemPrompt: {
         section(section) {
+          if (agent.failSection) throw new Error('section registration failed')
           sections.push(section)
           return () => {
+            if (agent.failDispose) throw new Error('dispose failed')
             const index = sections.indexOf(section)
             if (index !== -1) sections.splice(index, 1)
           }
@@ -36,6 +38,7 @@ function makeAgent(id, agentPreset) {
         register(definition) {
           registrations.push(definition)
           return () => {
+            if (agent.failDispose) throw new Error('dispose failed')
             const index = registrations.indexOf(definition)
             if (index !== -1) registrations.splice(index, 1)
           }
@@ -91,6 +94,12 @@ const defaultInitial = {
 }
 
 function makeManager(overrides = {}) {
+  const {
+    startThrows = false,
+    disposeThrows = false,
+    taskDisposeThrows = false,
+    ...rest
+  } = overrides
   const state = {
     initial: defaultInitial,
     canWrap: true,
@@ -99,7 +108,7 @@ function makeManager(overrides = {}) {
     started: 0,
     disposed: 0,
     taskDisposed: 0,
-    ...overrides,
+    ...rest,
   }
   state.current = state.initial
   const manager = {
@@ -114,10 +123,12 @@ function makeManager(overrides = {}) {
     },
     current: () => state.current,
     start() {
+      if (startThrows) throw new Error('start failed')
       state.started += 1
       return {
         ready: state.ready,
         dispose() {
+          if (taskDisposeThrows) throw new Error('task dispose failed')
           state.taskDisposed += 1
         },
       }
@@ -125,6 +136,7 @@ function makeManager(overrides = {}) {
     async checkNow() {},
     dispose() {
       state.disposed += 1
+      if (disposeThrows) throw new Error('manager dispose failed')
     },
   }
   return { manager, state }
@@ -139,13 +151,15 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
   const settings = []
   const services = options.services ?? {}
 
-  let visibleBash = options.bash ?? {
-    name: 'bash',
-    description: 'inherited bash',
-    parameters: { type: 'object', properties: {} },
-    output: { schema: { type: 'string' }, render: () => [] },
-    async execute() { return 'bash' },
-  }
+  let visibleBash = 'bash' in options
+    ? options.bash
+    : {
+      name: 'bash',
+      description: 'inherited bash',
+      parameters: { type: 'object', properties: {} },
+      output: { schema: { type: 'string' }, render: () => [] },
+      async execute() { return 'bash' },
+    }
 
   const ctx = {
     tools: {
@@ -532,6 +546,43 @@ test('the optional Config schema is generated from the shared option table', asy
   assert.deepEqual(Object.keys(normalizeConfig(undefined)), OPTIONS.map((option) => option.key))
 })
 
+test('an unknown option kind keeps its documented default', async () => {
+  const { OPTIONS, buildConfigSchema, normalizeConfig } = await import('../lib/config.js')
+  const extra = { key: 'mystery', kind: 'mystery', default: 'fallback' }
+  OPTIONS.push(extra)
+  try {
+    assert.equal(normalizeConfig({ mystery: 'anything' }).mystery, 'fallback')
+    const field = () => {
+      const builder = {
+        defaultValue: undefined,
+        default(value) {
+          builder.defaultValue = value
+          return builder
+        },
+        step() {
+          return builder
+        },
+        min() {
+          return builder
+        },
+      }
+      return builder
+    }
+    const z = {
+      boolean: field,
+      string: field,
+      number: field,
+      const: field,
+      union: () => field(),
+      any: field,
+      object: (shape) => ({ shape }),
+    }
+    assert.equal(buildConfigSchema(z).shape.mystery.defaultValue, 'fallback')
+  } finally {
+    OPTIONS.pop()
+  }
+})
+
 test('registers a status route when the web server is present', async () => {
   const routes = []
   const webServer = {
@@ -697,6 +748,391 @@ test('a switch to minimal drops a shadow captured under the previous preset', as
   assert.equal(agent.registrations.length, 0)
   assert.equal(harness.shadowCalls.length, 1)
   assert.match(harness.infos.join('\n'), /leaving the minimal preset's bash unfiltered/)
+})
+
+test('the section order falls back when the prompt service cannot advise one', async () => {
+  const harness = makeCtx()
+  harness.ctx.systemPrompt.getSectionOrder = () => {
+    throw new Error('no ordering')
+  }
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.sections[0].order, 1001)
+})
+
+test('the section order falls back when the prompt service returns no number', async () => {
+  const harness = makeCtx()
+  harness.ctx.systemPrompt.getSectionOrder = () => undefined
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.sections[0].order, 1001)
+})
+
+test('a throwing preset registry falls back to the session header', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  harness.ctx.get = (name) => {
+    if (name === 'agentPresets') {
+      return { presetForSession() { throw new Error('registry down') } }
+    }
+    return undefined
+  }
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
+})
+
+test('a throwing session header leaves the preset unknown', async () => {
+  const agent = makeAgent('agent-1')
+  agent.session = {
+    id: 'agent-1',
+    get header() {
+      throw new Error('header unavailable')
+    },
+  }
+  const harness = makeCtx([agent], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(agent.registrations.length, 1)
+})
+
+test('a throwing current lookup is treated as no binary', async () => {
+  const harness = makeCtx()
+  const { manager } = makeManager()
+  manager.current = () => {
+    throw new Error('manager is torn down')
+  }
+  await activateWith(harness, {}, manager)
+  const options = harness.shadowCalls[0]
+  assert.deepEqual(await options.rewrite({ command: 'git status' }), {
+    kind: 'pass',
+    reason: 'RTK is not ready yet',
+  })
+  assert.equal(options.getPathPrefix(), undefined)
+})
+
+test('the status route reports an installing runtime', async () => {
+  const routes = []
+  const harness = makeCtx([makeAgent('agent-1')], {
+    services: { webServer: { register(route) { routes.push(route); return () => {} } } },
+  })
+  harness.deps.readGainStatus = async () => aggregateGain({ daily: [] })
+  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true }).manager)
+
+  const res = {
+    statusCode: 0,
+    headers: {},
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value },
+    end(body) { this.body = body },
+  }
+  await routes[0].handler({ method: 'GET', url: '/rtk-filter/status', headers: {} }, res)
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.runtime.state, 'installing')
+  assert.equal(payload.runtime.version, null)
+  assert.equal(payload.runtime.source, null)
+})
+
+test('the status route reports an unavailable runtime', async () => {
+  const routes = []
+  const harness = makeCtx([makeAgent('agent-1')], {
+    services: { webServer: { register(route) { routes.push(route); return () => {} } } },
+  })
+  harness.deps.readGainStatus = async () => aggregateGain({ daily: [] })
+  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: false }).manager)
+
+  const res = {
+    statusCode: 0,
+    headers: {},
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value },
+    end(body) { this.body = body },
+  }
+  await routes[0].handler({ method: 'GET', url: '/rtk-filter/status', headers: {} }, res)
+  const payload = JSON.parse(res.body)
+  assert.equal(payload.runtime.state, 'unavailable')
+})
+
+test('the status route uses the built-in gain reader by default', async () => {
+  const routes = []
+  const harness = makeCtx([makeAgent('agent-1')], {
+    services: { webServer: { register(route) { routes.push(route); return () => {} } } },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  delete harness.deps.readGainStatus
+
+  const res = {
+    statusCode: 0,
+    headers: {},
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value },
+    end(body) { this.body = body },
+  }
+  await routes[0].handler({ method: 'GET', url: '/rtk-filter/status', headers: {} }, res)
+  assert.equal(res.statusCode, 200)
+})
+
+test('logRewrites installs the rewrite log callback', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, { logRewrites: true }, makeManager().manager)
+  harness.shadowCalls[0].log('[rtk] git status -> rtk git status')
+  assert.match(harness.infos.join('\n'), /git status -> rtk git status/)
+})
+
+test('cwdFor resolves the session working directory and fails open', async () => {
+  const session = { id: 'session-1' }
+  const agent = makeAgent('agent-1')
+  agent.session = session
+  const harness = makeCtx([agent], {
+    services: {
+      workingDirectory: {
+        get(input) { return input === session ? '/work' : undefined },
+      },
+    },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const options = harness.shadowCalls[0]
+
+  assert.equal(options.cwdFor({ agent: { session } }), '/work')
+  assert.equal(options.cwdFor({ agent: {} }), undefined)
+  assert.equal(options.cwdFor({}), undefined)
+
+  harness.ctx.get = () => {
+    throw new Error('service lookup failed')
+  }
+  assert.equal(options.cwdFor({ agent: { session } }), undefined)
+})
+
+test('an agent without a visible bash stays unfiltered', async () => {
+  const harness = makeCtx([makeAgent('agent-1')], { bash: undefined })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.shadowCalls.length, 0)
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 0)
+})
+
+test('a throwing web server lookup skips the status route', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  harness.ctx.get = () => {
+    throw new Error('service lookup failed')
+  }
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
+})
+
+test('a non-Error shadow failure is reported', async () => {
+  const harness = makeCtx()
+  harness.deps.createBashShadow = () => {
+    throw 'shadow boom'
+  }
+  await activateWith(harness, {}, makeManager().manager)
+  assert.match(harness.warnings.join('\n'), /shadow boom/)
+})
+
+test('a non-Error scoped section failure is reported', async () => {
+  const agent = makeAgent('agent-1', 'minimal')
+  agent.ctx.systemPrompt.section = () => {
+    throw 'section boom'
+  }
+  const harness = makeCtx([agent], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.match(harness.warnings.join('\n'), /section boom/)
+})
+
+test('an already-installed agent is not registered twice', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  harness.handlers.get('agent/created')({ agent })
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(harness.shadowCalls.length, 1)
+})
+
+test('a non-Error manager start failure is reported', async () => {
+  const harness = makeCtx()
+  const { manager } = makeManager({ initial: undefined, canWrap: true })
+  manager.start = () => {
+    throw 'start boom'
+  }
+  await activateWith(harness, {}, manager)
+  assert.match(harness.warnings.join('\n'), /could not start the RTK manager: start boom/)
+})
+
+test('a shadow or registration failure leaves the agent unfiltered', async () => {
+  const shadowFailure = makeCtx()
+  shadowFailure.deps.createBashShadow = () => {
+    throw new Error('shadow factory failed')
+  }
+  await activateWith(shadowFailure, {}, makeManager().manager)
+  assert.match(shadowFailure.warnings.join('\n'), /could not filter bash for agent agent-1: shadow factory failed/)
+
+  const registerFailure = makeCtx()
+  registerFailure.ctx.agents.list()[0].ctx.tools.register = () => {
+    throw new Error('registration failed')
+  }
+  await activateWith(registerFailure, {}, makeManager().manager)
+  assert.match(registerFailure.warnings.join('\n'), /registration failed/)
+})
+
+test('a command-only agent without a scoped prompt gets no note', async () => {
+  const agent = makeAgent('agent-1', 'minimal')
+  agent.ctx.systemPrompt = {}
+  const harness = makeCtx([agent], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.equal(agent.registrations.length, 1)
+  assert.equal(agent.sections.length, 0)
+})
+
+test('a failing scoped section registration is reported', async () => {
+  const agent = makeAgent('agent-1', 'minimal')
+  agent.failSection = true
+  const harness = makeCtx([agent], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  assert.match(harness.warnings.join('\n'), /could not add the persistent-shell note/)
+})
+
+test('a throwing registration disposer does not fail a preset switch', async () => {
+  const presets = makePresets('minimal')
+  const agent = makeAgent('agent-1', 'minimal')
+  agent.failDispose = true
+  const harness = makeCtx([agent], {
+    bash: persistentBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  presets.state.preset = 'standard'
+  harness.setBash(standardBash())
+  harness.handlers.get('agent-preset/selected')(agent.session.id)
+  // The throwing disposer left the old shadow registered, so the next capture
+  // mirrors it and adds another registration; the important part is that the
+  // switch did not throw.
+  assert.equal(agent.registrations.length, 2)
+})
+
+test('tools/change re-captures when the preset no longer accepts the mirrored shape', async () => {
+  const presets = makePresets('standard')
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], {
+    bash: standardBash(),
+    services: { agentPresets: presets.service },
+  })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.registrations.length, 1)
+
+  presets.state.preset = 'minimal'
+  harness.handlers.get('tools/change')()
+
+  assert.equal(agent.registrations.length, 0)
+  assert.match(harness.infos.join('\n'), /leaving the minimal preset's bash unfiltered/)
+})
+
+test('tools/change re-captures a bash replaced by another plugin', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'standard')], { bash: standardBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(harness.shadowCalls[0].getBase().description, 'Execute a bash command')
+
+  const replacement = { ...standardBash(), description: 'replaced bash' }
+  agent.registrations.push(replacement)
+  harness.handlers.get('tools/change')()
+
+  assert.equal(harness.shadowCalls.length, 2)
+  assert.equal(harness.shadowCalls[1].getBase().description, 'replaced bash')
+  assert.equal(agent.registrations.length, 2)
+})
+
+test('agent/created with no agent is ignored and an inert manager registers nothing', async () => {
+  const harness = makeCtx([])
+  await activateWith(harness, {}, makeManager().manager)
+  harness.handlers.get('agent/created')({ agent: undefined })
+  assert.equal(harness.shadowCalls.length, 0)
+
+  const inert = makeCtx([])
+  await activateWith(inert, {}, makeManager({ canWrap: false }).manager)
+  const created = makeAgent('agent-2')
+  inert.handlers.get('agent/created')({ agent: created })
+  assert.equal(created.registrations.length, 0)
+})
+
+test('agent/disposed forgets the shadow and its note', async () => {
+  const harness = makeCtx([makeAgent('agent-1', 'minimal')], { bash: persistentBash() })
+  await activateWith(harness, {}, makeManager().manager)
+  const agent = harness.ctx.agents.list()[0]
+  assert.equal(agent.sections.length, 1)
+
+  harness.handlers.get('agent/disposed')({ agent })
+  assert.equal(agent.sections.length, 0)
+})
+
+test('cleanup tolerates throwing disposers and removes scoped notes', async () => {
+  const agent = makeAgent('agent-1', 'minimal')
+  agent.failDispose = true
+  const harness = makeCtx([agent], { bash: persistentBash() })
+  const { manager } = makeManager({ disposeThrows: true, taskDisposeThrows: true })
+  await activateWith(harness, {}, manager)
+
+  for (const effect of harness.effects) {
+    assert.doesNotThrow(() => effect())
+  }
+  assert.equal(agent.registrations.length, 1)
+})
+
+test('a manager start failure is reported without failing activation', async () => {
+  const harness = makeCtx()
+  const { manager } = makeManager({ initial: undefined, canWrap: true, startThrows: true })
+  await activateWith(harness, {}, manager)
+  assert.match(harness.warnings.join('\n'), /could not start the RTK manager: start failed/)
+  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
+})
+
+test('an unavailable manager without a reason gets the default warning', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: false, reason: undefined }).manager)
+  assert.match(harness.warnings.join('\n'), /RTK is not available/)
+})
+
+test('a ready signal that arrives after disposal is ignored', async () => {
+  let resolveReady
+  const ready = new Promise((resolve) => { resolveReady = resolve })
+  const harness = makeCtx()
+  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true, ready }).manager)
+
+  for (const effect of harness.effects) effect()
+  resolveReady(true)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(harness.sections.length, 0)
+})
+
+test('a ready rejection after disposal is ignored', async () => {
+  let rejectReady
+  const ready = new Promise((resolve, reject) => { rejectReady = reject })
+  const harness = makeCtx()
+  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true, ready }).manager)
+
+  for (const effect of harness.effects) effect()
+  rejectReady(new Error('late failure'))
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(harness.warnings.length, 0)
+})
+
+test('a rejected ready signal is reported without failing activation', async () => {
+  const harness = makeCtx()
+  await activateWith(harness, {}, makeManager({
+    initial: undefined,
+    canWrap: true,
+    ready: Promise.reject(new Error('setup exploded')),
+  }).manager)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.match(harness.warnings.join('\n'), /RTK setup failed: setup exploded/)
+
+  const nonError = makeCtx()
+  await activateWith(nonError, {}, makeManager({
+    initial: undefined,
+    canWrap: true,
+    ready: Promise.reject('setup exploded'),
+  }).manager)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.match(nonError.warnings.join('\n'), /RTK setup failed: setup exploded/)
+})
+
+test('a non-Error manager creation failure is reported', async () => {
+  const harness = makeCtx()
+  harness.deps.createRtkManager = async () => {
+    throw 'boom'
+  }
+  await activate(harness.ctx, {}, harness.deps)
+  assert.match(harness.warnings.join('\n'), /could not prepare the RTK binary manager: boom/)
 })
 
 test('a selection event for another session leaves this agent alone', async () => {
