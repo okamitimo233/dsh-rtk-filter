@@ -42,7 +42,7 @@ semantics:
 | Installer | `lib/release.js` | Platform target, asset/URL naming, checksums, latest tag, archive download. |
 | Installer | `lib/tar.js` | Defensive tar.gz parsing (only the wanted files). |
 | Installer | `lib/version.js` | Version parse/compare, minimum gate, tag normalization. |
-| Settings | `lib/status.js` | `rtk gain` folding, pure payload builder, thin same-origin JSON route. |
+| Settings | `lib/status.js` | `rtk gain` folding, runtime badge projection (`projectRuntime`), pure payload builder, thin same-origin JSON route. |
 | Settings | `lib/client.js` | Hand-written browser bundle: registers the settings section and zh/en dictionaries. |
 
 ## Dependency rules
@@ -118,6 +118,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 | Error-to-text rule | `lib/proc.js` (`describeError`) |
 | Rewrite exit-code protocol | `lib/rewrite.js` (`interpretRewrite`) |
 | Status wire shape | `lib/status.js` (`buildStatusPayload`) |
+| Runtime badge projection | `lib/status.js` (`projectRuntime`) |
 | Cache layout and state schema | `lib/store.js` |
 
 ## Constraints and pitfalls
@@ -175,6 +176,11 @@ a concrete failure.
   `undici.Agent` would bypass the user's `HTTPS_PROXY` settings.
 - **The session log keeps the model's command.** `tool/call` records the
   original text; only `logRewrites: true` logs the rewritten pair.
+- **Windows/pwsh is not covered.** Only the POSIX `bash` tool is shadowed, and
+  the managed release only publishes Linux/macOS targets. On `win32` the
+  manager reports that auto-install is unsupported and stays inert; a PATH
+  `rtk` can still be used. Supporting `pwsh` would need its own preset shape,
+  overlay syntax, and archive format.
 - **Scoped registration can remain visible under `tools.restrict`.** A preset
   that denies the global `bash` does not necessarily hide this shadow. The
   stock profile and plan mode do not deny `bash`.
@@ -185,12 +191,18 @@ a concrete failure.
 ## Testing
 
 ```bash
-node --test test/*.test.mjs
+npm test          # node --test test/*.test.mjs
+npm run coverage  # same suite; fails below 100% line/branch/function coverage
+npm run smoke     # network only: real RTK install into a temporary DSH_HOME
 ```
 
-Tests use only Node built-ins and fixtures: fake `rtk` shell scripts, generated
-tar archives, a fake `fetch`, a fake browser/module-loader sandbox, and a fake
-Cordis context. No network or real `rtk` is required.
+The unit suite uses only Node built-ins and fixtures: fake `rtk` shell scripts,
+generated tar archives, a fake `fetch`, a fake browser/module-loader sandbox,
+and a fake Cordis context. No network or real `rtk` is required.
+[.github/workflows/ci.yml](../.github/workflows/ci.yml) runs it with the coverage
+thresholds on every push and pull request;
+[.github/workflows/install-smoke.yml](../.github/workflows/install-smoke.yml)
+runs the network smoke on demand.
 
 ## Extending
 

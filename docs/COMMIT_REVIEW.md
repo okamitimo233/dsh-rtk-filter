@@ -277,8 +277,14 @@ grep -n "createRtkManager\|function " lib/sidecar.js
 | 安装器单体 | 新建 `lib/fsx.js`（128 行）与 `lib/store.js`（261 行）；`sidecar.js` 744→675，只保留来源解析/安装器/调度；`sidecar` 的配置 clamp 改为消费 `config.js` | `9ed294e` + 集成提交 |
 | rewrite 协议 / status payload | `interpretRewrite()`、`buildStatusPayload()`、`readRuntimeSafe()`、`resolveRequestRejection()` 成为可单测纯函数；`client.js` 仅机械去重 | `80e91ec` |
 | 文档同步（§7.1） | `HANDOFF.md` 精简为薄交接；长期说明迁入 `docs/ARCHITECTURE.md`；两份 README 的架构图与链接已同步 | 文档提交 |
-| 测试计数漂移（§7.2） | `node --test test/*.test.mjs` → **175/175** 通过（原 108），HANDOFF §1/§6 已回写 | 同上 |
+| 测试计数漂移（§7.2） | `npm test` → **298/298** 通过（重构时 175，后续补测至 297，本轮 +1）；`npm run coverage` 行/分支/函数 100%，HANDOFF §1 与 CLAUDE.md 已回写 | 同上 |
 | abort code 决策（§7.4） | 工具调用取消保持 `code = 'ABORTED'`，进程/安装取消用 `ABORT_ERR`；长期说明见 `docs/ARCHITECTURE.md` 的「Constraints and pitfalls」（「Two abort codes, one contract」） | 同上 |
+| 真实安装冒烟（§7.8） | `npm run smoke`（`scripts/install-smoke.mjs`）：真实网络下载 v1.2.0、SHA-256 校验、tar 解压、`--version`、`rewrite`、`rtk gain`，并在临时 `DSH_HOME` 校验 state/latest；本机实测通过（sha256 `70fee7b4…`） | 本轮 |
+| CI（§7.7） | `.github/workflows/ci.yml`：push/PR 跑 `npm test` + 100% 覆盖率阈值；`.github/workflows/install-smoke.yml`：手动触发真实安装链路 | 本轮 |
+| status 健康投影（§7.5） | 把 wire 值投影抽成纯函数 `projectRuntime()`（`lib/status.js`）；`activate.js` 只做 manager 适配 | 本轮 |
+| 推送与历史（§7.6） | `origin` 已配置且 `main` 与 `origin/main` 同步；重构经 PR #1 合并并保留分层提交；已公开的 main 历史不再 squash | 已落地 |
+| Windows/pwsh（§7.7） | 明确为非目标：仅 POSIX `bash`、托管下载仅 Linux/macOS；`win32` 下保持惰性（既有测试覆盖） | 文档化 |
 
-§7 其余项（CI/remote、npm 发布、Windows/pwsh、`$DSH_RTK_BIN`、status 健康投影边界、
-真实 `$DSH_HOME` 安装冒烟）仍留作后续，未在本分支处理。
+仍留作后续：npm 发布并验证 Config schema、通过 `ctx.shellEnv` 暴露 `$DSH_RTK_BIN`、
+live 会话重载后的人工验证（见 HANDOFF §3 未勾选项）。验收口径：`npm test` 298/298、
+`npm run coverage` 行/分支/函数 100%、`npm run smoke` 真实安装通过（2026-11-12）。

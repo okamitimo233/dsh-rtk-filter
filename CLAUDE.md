@@ -13,11 +13,11 @@ DSH（DeepSeek Harness）插件：把模型调用的 `bash` 命令透明地改�
 仓库零依赖、无构建步骤、无 lint 配置；除 `index.js` 对 schemastery 的一次可选动态导入外，只使用 Node 内置模块。
 
 ```bash
-# 全部单元测试（297 个，使用 fake rtk / 生成的 tar / fake fetch / fake Context）
-node --test test/*.test.mjs
+# 全部单元测试（298 个，使用 fake rtk / 生成的 tar / fake fetch / fake Context）
+npm test
 
-# 覆盖率（行/分支/函数均为 100%；lib/client.js 由 VM 沙箱评估，不在插桩集合内）
-node --test --experimental-test-coverage test/*.test.mjs
+# 覆盖率（行/分支/函数均为 100% 且带阈值，CI 同款；lib/client.js 由 VM 沙箱评估，不在插桩集合内）
+npm run coverage
 
 # 单个测试文件
 node --test test/shadow.test.mjs
@@ -26,26 +26,11 @@ node --test test/shadow.test.mjs
 node --test --test-name-pattern="PATH overlay" test/shadow.test.mjs
 ```
 
-真实的安装链路冒烟（会联网，使用临时 `$DSH_HOME`，见 README「Development」节）：
+真实的安装链路冒烟（会联网，使用临时 `$DSH_HOME`，实现见 `scripts/install-smoke.mjs`；
+CI 可手动触发 `.github/workflows/install-smoke.yml`）：
 
 ```bash
-DSH_HOME=$(mktemp -d) node --input-type=module -e "
-import { createRtkManager } from './lib/sidecar.js'
-import { probeRtk, rewriteCommand } from './lib/rewrite.js'
-const manager = await createRtkManager({
-  ctx: { get: () => ({ home: process.env.DSH_HOME }) },
-  settings: { autoUpdate: false },
-  deps: {
-    probeRtk,
-    smokeRewrite: async ({ binary, signal }) =>
-      (await rewriteCommand({ binary, command: 'git status', signal })).kind === 'rewrite'
-        ? { ok: true } : { ok: false, reason: 'no rewrite' },
-    logger: console,
-  },
-})
-console.log(await manager.start().ready, manager.current())
-manager.dispose()
-"
+npm run smoke
 ```
 
 安装/卸载到 DSH 使用 Host 的 `plugin_manager` 工具（`install_bundle` / `remove_bundle`，target 为本仓库绝对路径）；链接安装的代码变更需要 Host 重新加载后才在 live 会话生效。

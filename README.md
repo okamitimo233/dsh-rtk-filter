@@ -1,5 +1,7 @@
 # RTK for DeepSeek Harness
 
+[![CI](https://github.com/okamitimo233/dsh-rtk-filter/actions/workflows/ci.yml/badge.svg)](https://github.com/okamitimo233/dsh-rtk-filter/actions/workflows/ci.yml)
+
 English | [中文](README_zh.md)
 
 Transparently runs the DeepSeek Harness `bash` tool through [RTK](https://github.com/rtk-ai/rtk)
@@ -334,34 +336,26 @@ Additional rules:
 
 ## Development
 
-Unit tests use only Node built-ins and generated tar fixtures:
+Unit tests use only Node built-ins and generated fixtures (fake `rtk` scripts,
+tar archives, a fake `fetch`, a fake browser/module-loader sandbox, and a fake
+Cordis context). No network or real `rtk` is required, so CI runs them on every
+push and pull request:
 
 ```bash
-node --test test/*.test.mjs
+npm test          # node --test test/*.test.mjs
+npm run coverage  # the same suite with 100% line/branch/function thresholds
 ```
 
-The release pipeline can be exercised against upstream once with a temporary
-home; no global installation is involved:
+The release pipeline is exercised end to end against upstream with a temporary
+`DSH_HOME` (network required; no global installation is involved):
 
 ```bash
-DSH_HOME=$(mktemp -d) node --input-type=module -e "
-import { createRtkManager } from './lib/sidecar.js'
-import { probeRtk, rewriteCommand } from './lib/rewrite.js'
-const manager = await createRtkManager({
-  ctx: { get: () => ({ home: process.env.DSH_HOME }) },
-  settings: { autoUpdate: false },
-  deps: {
-    probeRtk,
-    smokeRewrite: async ({ binary, signal }) =>
-      (await rewriteCommand({ binary, command: 'git status', signal })).kind === 'rewrite'
-        ? { ok: true } : { ok: false, reason: 'no rewrite' },
-    logger: console,
-  },
-})
-console.log(await manager.start().ready, manager.current())
-manager.dispose()
-"
+npm run smoke
 ```
+
+`npm run smoke` is the script behind
+[.github/workflows/install-smoke.yml](.github/workflows/install-smoke.yml),
+which a maintainer can trigger from the Actions tab.
 
 ## Handoff
 

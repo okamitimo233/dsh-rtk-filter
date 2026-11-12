@@ -16,7 +16,11 @@
   不再需要全局安装。系统 `PATH` 上的 `rtk` 只作为下载期间的临时回退。
 - 上游 RTK 仓库 `/home/plana/Repos/rtk` 保持冻结（HEAD `08a261a0`），
   **不要再改动**。
-- 测试：`node --test test/*.test.mjs` → 297/297 通过；`node --test --experimental-test-coverage test/*.test.mjs` → 行/分支/函数 100%（index.js 与 lib，`lib/client.js` 由 VM 沙箱评估，不计入该报告的插桩集合）（2026-11-12）。
+- 测试：`npm test` → **298/298** 通过；`npm run coverage` → 行/分支/函数 100%（`index.js` 与 `lib/`；`lib/client.js` 由 VM 沙箱评估，不在插桩集合内）（2026-11-12）。
+- 远程与历史：`origin` = https://github.com/okamitimo233/dsh-rtk-filter；`main` 与
+  `origin/main` 同步，重构经 PR #1 合并并保留分层提交，已公开历史不再 squash。
+- CI：`.github/workflows/ci.yml` 在 push/PR 上跑单测与覆盖率阈值；
+  `.github/workflows/install-smoke.yml` 手动触发真实安装冒烟。
 - 从 checkout 链接安装时没有 Config schema，但 row 的原始 `config` 仍会传到
   `apply`；详见 README。
 
@@ -43,8 +47,9 @@
 
 待完成的验证（2026-11-12 合并后尚未执行）：
 
-- [ ] 用临时 `$DSH_HOME` 跑完整安装冒烟（README「Development」）：解析 latest
-      tag、下载、SHA-256、tar 解压、`--version`、rewrite 冒烟、state 写入。
+- [x] 用临时 `$DSH_HOME` 跑完整安装冒烟（`npm run smoke`）：解析 latest tag、
+      下载、SHA-256、tar 解压、`--version`、rewrite、`rtk gain`、state 写入
+      ——2026-11-12 通过（RTK v1.2.0，sha256 `70fee7b4…`）。
 - [ ] Host 重新加载链接目录后，在 live 会话确认：仍只有一个 `bash`、schema 未变、
       `git status` 输出被 RTK 压缩、后台 job 正常。
 - [ ] live deny（exit 2）：构造真实 deny 规则，确认命令不执行且错误文本可见。
@@ -57,9 +62,8 @@
 
 ## 4. 下一步
 
-- 补 CI（`node --test`）。
 - 若发布为 npm 包并复制进 profile，验证 Config schema 是否恢复可用。
-- 可选：Windows 支持、安装失败退避、通过 `ctx.shellEnv` 暴露 `$DSH_RTK_BIN`。
+- 可选：Windows/pwsh 支持、安装失败退避、通过 `ctx.shellEnv` 暴露 `$DSH_RTK_BIN`。
 
 ## 5. 运维速查
 
@@ -91,6 +95,7 @@ rm -rf "$HOME/.dsh/cache/rtk-filter"
 ## 6. 参考
 
 - 上游 RTK：https://github.com/rtk-ai/rtk
+- CI 与安装冒烟：`.github/workflows/ci.yml`、`.github/workflows/install-smoke.yml`
 - 本仓库架构：`docs/ARCHITECTURE.md`（模块边界、依赖规则、约束与坑）
 - 提交审查与补丁链：`docs/COMMIT_REVIEW.md`
 - 用户文档：`README.md` / `README_zh.md`

@@ -1,5 +1,7 @@
 # RTK for DeepSeek Harness
 
+[![CI](https://github.com/okamitimo233/dsh-rtk-filter/actions/workflows/ci.yml/badge.svg)](https://github.com/okamitimo233/dsh-rtk-filter/actions/workflows/ci.yml)
+
 [English](README.md) | 中文
 
 让 DeepSeek Harness 的 `bash` 工具透明地经由 [RTK](https://github.com/rtk-ai/rtk) 执行，
@@ -282,33 +284,23 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 
 ## 开发
 
-单元测试只依赖 Node 内置模块和生成的 tar 测试夹具：
+单元测试只依赖 Node 内置模块和生成的测试夹具（fake `rtk` 脚本、tar 归档、fake `fetch`、
+fake 浏览器/模块加载器沙箱、fake Cordis Context），不需要网络或真实 `rtk`；CI 在每次
+push/PR 上运行：
 
 ```bash
-node --test test/*.test.mjs
+npm test          # node --test test/*.test.mjs
+npm run coverage  # 同一套测试 + 行/分支/函数 100% 阈值
 ```
 
-可以用临时 home 针对上游跑一次 release 流程；整个过程不涉及全局安装：
+用临时 `DSH_HOME` 针对上游完整跑一次安装链路（需要网络，不涉及全局安装）：
 
 ```bash
-DSH_HOME=$(mktemp -d) node --input-type=module -e "
-import { createRtkManager } from './lib/sidecar.js'
-import { probeRtk, rewriteCommand } from './lib/rewrite.js'
-const manager = await createRtkManager({
-  ctx: { get: () => ({ home: process.env.DSH_HOME }) },
-  settings: { autoUpdate: false },
-  deps: {
-    probeRtk,
-    smokeRewrite: async ({ binary, signal }) =>
-      (await rewriteCommand({ binary, command: 'git status', signal })).kind === 'rewrite'
-        ? { ok: true } : { ok: false, reason: 'no rewrite' },
-    logger: console,
-  },
-})
-console.log(await manager.start().ready, manager.current())
-manager.dispose()
-"
+npm run smoke
 ```
+
+`npm run smoke` 即 [.github/workflows/install-smoke.yml](.github/workflows/install-smoke.yml)
+中的脚本，维护者可从 Actions 页手动触发。
 
 ## Handoff
 
