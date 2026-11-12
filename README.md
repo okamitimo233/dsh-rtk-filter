@@ -365,4 +365,4 @@ manager.dispose()
 
 ## Handoff
 
-See [HANDOFF.md](HANDOFF.md) for the implementation history, operational notes, verification record, and known pitfalls. [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module boundaries; [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains why they exist.
+See [HANDOFF.md](HANDOFF.md) for the current handoff state, operations quick reference, and next steps. [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module boundaries, constraints, and pitfalls; [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains why they exist.

@@ -312,6 +312,6 @@ manager.dispose()
 
 ## Handoff
 
-实现历史、运维说明、验证记录和已知坑点见 [HANDOFF.md](HANDOFF.md)。当前模块边界见
+当前交接状态、运维速查和下一步见 [HANDOFF.md](HANDOFF.md)。模块边界、约束与坑点见
 [ARCHITECTURE.md](docs/ARCHITECTURE.md)；重构动机与提交考古见
 [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md)。
