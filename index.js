@@ -7,14 +7,13 @@
  * reaches the model without a new tool or a changed tool schema.
  */
 
-import { tmpdir } from 'node:os'
-
 import { activate } from './lib/activate.js'
 import { buildConfigSchema } from './lib/config.js'
 import { abortError } from './lib/proc.js'
 import { probeRtk, rewriteCommand } from './lib/rewrite.js'
 import { createBashShadow } from './lib/shadow.js'
-import { createRtkManager } from './lib/sidecar.js'
+import { installOfficialRtk } from './lib/installer.js'
+import { createRtkManager } from './lib/manager.js'
 
 /** Plugin name registered with the Loader. */
 export const name = 'rtk-filter'
@@ -49,38 +48,13 @@ export const Config = await loadConfigSchema()
  */
 export const toolAborted = () => abortError('tool call aborted', 'ABORTED')
 
-/**
- * Verify that a freshly downloaded binary still speaks the rewrite protocol.
- * Try two ubiquitous commands so a project-local deny rule for one of them
- * does not reject an otherwise valid download; at least one must rewrite.
- */
-export async function smokeRewrite({ binary, signal }) {
-  const failures = []
-  for (const command of ['git status', 'ls']) {
-    try {
-      const outcome = await rewriteCommand({
-        binary,
-        command,
-        cwd: tmpdir(),
-        timeoutMs: 5000,
-        signal,
-      })
-      if (outcome.kind === 'rewrite') return { ok: true }
-      failures.push(`${command}: ${outcome.kind} (${outcome.reason})`)
-    } catch (error) {
-      failures.push(`${command}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-  return { ok: false, reason: `expected a rewrite for at least one probe command; ${failures.join('; ')}` }
-}
-
 export function apply(ctx, config = {}) {
   return activate(ctx, config, {
     probeRtk,
     rewriteCommand,
     createBashShadow,
     createRtkManager,
-    smokeRewrite,
+    installOfficialRtk,
     toolAborted,
   })
 }

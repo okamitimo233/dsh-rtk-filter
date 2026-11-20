@@ -2,7 +2,7 @@
   "name": "@rtk-ai/dsh-rtk-filter",
   "version": "0.50.0",
   "private": true,
-  "description": "Transparently runs DeepSeek Harness bash commands through RTK, installs and updates its own RTK binary, and exposes an RTK status/config section in DSH Settings.",
+  "description": "Transparently runs DeepSeek Harness bash commands through RTK, can bootstrap RTK with the official upstream installer, and exposes an RTK status/config section in DSH Settings.",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {

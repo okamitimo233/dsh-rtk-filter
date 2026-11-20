@@ -1,10 +1,18 @@
 # Architecture
 
 This plugin changes no tool and no schema. Per agent, it shadows the `bash`
-tool, asks the upstream `rtk` binary whether a command has a rewrite, and then
+tool, asks an external `rtk` binary whether a command has a rewrite, and then
 delegates the rewritten command to the real `bash`. Sandboxing, approvals,
 background jobs, timeouts, output spill, and rendering stay the built-in
 implementation's job.
+
+The plugin resolves one external executable at activation time. It checks
+`rtk` on the Host PATH, then the official install path
+`${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk`. If neither is usable it runs RTK's
+official upstream install script once. That one-time download plus execution
+shares a 30-second deadline so an unavailable network cannot stall activation
+for minutes. The plugin keeps no private cache and does not update RTK in the
+background.
 
 The commit history behind this design is in [COMMIT_REVIEW.md](COMMIT_REVIEW.md).
 This file describes the current module boundaries and the rules that keep them
@@ -31,35 +39,35 @@ semantics:
 | Entry | `index.js` | `name`/`inject`/`Config`/`apply`; wires the runtime dependencies. |
 | Entry | `lib/config.js` | Option defaults, normalization, and the schemastery descriptor. The only place a default literal lives. |
 | Orchestration | `lib/activate.js` | Activation lifecycle: manager creation, lazy shadow registration and re-capture, prompt timing, status route, cleanup. |
+| Binary | `lib/manager.js` | Checks Host `PATH`, then the official install path, optionally invokes the official installer, probes the executable, and exposes the manager interface used by activation. |
+| Binary | `lib/installer.js` | Downloads the official `install.sh`, runs it from a private temp directory, and returns the installed `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk` path. |
 | Shell model | `lib/shell.js` | Derives a shell profile from the captured bash definition; preset policy; idempotent PATH overlay; awareness text composition. |
 | Shell model | `lib/awareness.js` | Prompt text as plain data. |
 | Filter | `lib/shadow.js` | The same-named `bash` definition: getter mirroring and delegation. |
 | Filter | `lib/rewrite.js` | `probeRtk`, the pure `interpretRewrite` exit-code protocol, and `rewriteCommand`. |
 | Filter | `lib/proc.js` | Child-process execution, the abort-error contract, error text. The only place they are defined. |
-| Installer | `lib/sidecar.js` | Composition layer: source resolution (explicit > managed > PATH), installer, update scheduling. |
-| Installer | `lib/store.js` | Cache layout, state schema, version listing, GC, latest-tag cache, cross-process lock. Network-free. |
-| Installer | `lib/fsx.js` | Atomic JSON write, temp paths, quiet removal, root containment, executable checks. |
-| Installer | `lib/release.js` | Platform target, asset/URL naming, checksums, latest tag, archive download. |
-| Installer | `lib/tar.js` | Defensive tar.gz parsing (only the wanted files). |
-| Installer | `lib/version.js` | Version parse/compare, minimum gate, tag normalization. |
+| Utilities | `lib/version.js` | Version parse/compare and the minimum `rtk rewrite` gate. |
 | Settings | `lib/status.js` | `rtk gain` folding, runtime badge projection (`projectRuntime`), pure payload builder, thin same-origin JSON route. |
 | Settings | `lib/client.js` | Hand-written browser bundle: registers the settings section and zh/en dictionaries. |
 
 ## Dependency rules
 
 1. **Leaves import nothing from `lib/`.** `proc.js`, `version.js`, and
-   `awareness.js` are leaves. `fsx.js` depends only on Node built-ins;
-   `tar.js` depends only on Node built-ins plus `proc.js` for error text.
-2. **`activate.js` does no process or file IO.** It composes `sidecar.js`,
-   `shell.js`, `shadow.js`, and `status.js`; the manager owns everything that
-   touches the network or the cache.
+   `awareness.js` are leaves.
+2. **`activate.js` does no process or file IO.** It composes `manager.js`,
+   `shell.js`, `shadow.js`, and `status.js`; `manager.js` owns binary probing.
 3. **No static `@deepseek-ai/*` import.** A bundle linked from a checkout cannot
    resolve shipped packages, so `index.js` imports schemastery dynamically and
    degrades to raw-config normalization when that fails.
 4. **`client.js` keeps its loader contract.** It is evaluated as
    `window.__ModuleLoader__.load({ id, factory })` and cannot use ES imports;
    its dictionary keys, wording, CSS, and DOM/SVG output are user-visible API.
-5. **`store.js` never talks to the network.** Only `sidecar.js`/   `release.js` download.
+5. **Installation is delegated to the official script.** `manager.js` may
+   invoke `installer.js` only when neither the PATH nor the existing official
+   install path works. It must not implement a private download/cache/update
+   pipeline. `installer.js` writes no long-lived state, streams the script
+   through a size cap, removes its staging directory, and uses one normalized
+   `RTK_INSTALL_DIR` for both the child environment and the returned probe path.
 
 ## Data flow
 
@@ -73,7 +81,7 @@ model calls bash(command)
        exit 1    original command
        exit 2    deny (never executes)
        else      fail open: original command
-  -> PATH overlay (lib/shell.js) when a managed binary is in use
+  -> PATH overlay (lib/shell.js) only for the absolute official install path
   -> inherited bash executes the command
 ```
 
@@ -82,25 +90,25 @@ model calls bash(command)
 ```
 apply
   -> normalizeConfig                       lib/config.js
-  -> createRtkManager                      lib/sidecar.js
-       resolve source: explicit > managed > PATH, else auto-install
+  -> createRtkManager                      lib/manager.js
+       rtk on Host PATH             -> use it
+       official install path        -> use it
+       otherwise                    -> official install.sh -> global binary
+       probe --version once and require >= 0.23.0
   -> register a lazy shadow per agent      lib/activate.js + lib/shadow.js
        capture the agent's own bash, derive its shell profile
        skip registration when the profile contradicts the preset policy
-  -> add the awareness section once filtering is actually ready
+  -> add the awareness section
   -> add the command-only caveat per agent whose shell is the persistent one
 ```
 
-### Installer
+### Status
 
 ```
-resolve latest tag (redirect first, API fallback)   lib/release.js
-  -> download checksums + archive, verify SHA-256   lib/release.js
-  -> extract the wanted files                       lib/tar.js
-  -> stage under tmp/, probe --version + rewrite    lib/sidecar.js
-  -> atomic rename into versions/<edition>/<target>/<version>/
-  -> write state, collect garbage                   lib/store.js
-  -> update the PATH prefix used by the overlay     lib/shell.js
+GET /rtk-filter/status
+  -> runtime projection                    lib/status.js
+  -> rtk gain --daily --format json        lib/status.js
+  -> aggregate daily rows and summary      lib/status.js
 ```
 
 ## Sources of truth
@@ -111,6 +119,8 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 | Concept | Owner |
 |---|---|
 | Option defaults and clamps | `lib/config.js` (`OPTIONS`) |
+| Binary source precedence | `lib/manager.js` (`resolveSource`) |
+| Official install-script URL and execution | `lib/installer.js` |
 | Preset shell shape policy | `lib/shell.js` (`PRESET_SHELLS`) |
 | PATH overlay command | `lib/shell.js` (`withRtkPath`) |
 | Prompt text | `lib/awareness.js`; composition in `lib/shell.js` |
@@ -119,17 +129,21 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 | Rewrite exit-code protocol | `lib/rewrite.js` (`interpretRewrite`) |
 | Status wire shape | `lib/status.js` (`buildStatusPayload`) |
 | Runtime badge projection | `lib/status.js` (`projectRuntime`) |
-| Cache layout and state schema | `lib/store.js` |
 
 ## Constraints and pitfalls
-
-These rules are not visible in the module boundaries alone; each one comes from
-a concrete failure.
 
 - **A linked checkout cannot resolve DSH packages.** Every runtime module uses
   Node built-ins only. `index.js` loads schemastery through an optional dynamic
   import and degrades to raw-config normalization. Do not add a static
   `@deepseek-ai/*` import to "restore" the Config form.
+- **The binary is resolved once at activation.** Installing or replacing RTK
+  requires a Host reload/restart; do not add polling or background updates.
+- **Install only when both standard locations are unusable.** Never run the
+  installer just because a probed PATH binary is old or broken while the
+  official install path has a working binary.
+- **The official installer owns release verification.** `installer.js` downloads
+  `install.sh` over HTTPS and runs it; it must not grow its own archive parser,
+  state directory, lock, or update scheduler.
 - **Capture the agent's bash before registering the shadow.** In the Web
   surface the built-in tool lives in the agent-preset realm, so unscoped
   `ctx.tools.get('bash')` returns `undefined`; after registration the same
@@ -158,29 +172,23 @@ a concrete failure.
   `lib/activate.js` registers the composed text under the same section name on
   the agent's own prompt, shadowing the global text.
 - **The PATH overlay must stay idempotent.** The persistent shell keeps its
-  environment across calls, so prepending the managed directory unconditionally
+  environment across calls, so prepending a binary directory unconditionally
   grows `PATH` once per call. `withRtkPath` keeps the directory in
   `__rtk_prefix` and adds it only when absent.
-- **The managed binary is not on the user's PATH.** It is visible only inside
-  delegated bash calls through the overlay; a system `rtk` is never updated.
+- **The PATH overlay is for the absolute official install path only.** A bare
+  `rtk` source is already resolved from the inherited bash environment.
 - **Rewrite with the session working directory and no shell.** `rewriteCommand`
   uses `execFile(binary, ['rewrite', command])`; `cwd` comes from the agent
   session so project-local permission rules resolve normally. Do not set
   `RTK_REWRITE_HOST`; exit 3 is safe because DSH already gated the bash call.
-- **Two abort codes, one contract.** Process/install cancellation uses
-  `abortError()` (`ABORT_ERR`) from `lib/proc.js`; a cancelled tool call uses
+- **Two abort codes, one contract.** Process cancellation uses `abortError()`
+  (`ABORT_ERR`) from `lib/proc.js`; a cancelled tool call uses
   `abortError('tool call aborted', 'ABORTED')` in `index.js`. Both carry
   `name = 'AbortError'` for Host rendering.
-- **Use the global `fetch`, never a custom dispatcher.** The DSH launcher
-  installs a proxy dispatcher on the global `fetch`; constructing an
-  `undici.Agent` would bypass the user's `HTTPS_PROXY` settings.
 - **The session log keeps the model's command.** `tool/call` records the
   original text; only `logRewrites: true` logs the rewritten pair.
-- **Windows/pwsh is not covered.** Only the POSIX `bash` tool is shadowed, and
-  the managed release only publishes Linux/macOS targets. On `win32` the
-  manager reports that auto-install is unsupported and stays inert; a PATH
-  `rtk` can still be used. Supporting `pwsh` would need its own preset shape,
-  overlay syntax, and archive format.
+- **Windows/pwsh is not covered.** Only the POSIX `bash` tool is shadowed.
+  RTK itself must provide a compatible build for the Host platform.
 - **Scoped registration can remain visible under `tools.restrict`.** A preset
   that denies the global `bash` does not necessarily hide this shadow. The
   stock profile and plan mode do not deny `bash`.
@@ -193,16 +201,13 @@ a concrete failure.
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # same suite; fails below 100% line/branch/function coverage
-npm run smoke     # network only: real RTK install into a temporary DSH_HOME
+npm run smoke     # manual real-network install through the upstream script
 ```
 
 The unit suite uses only Node built-ins and fixtures: fake `rtk` shell scripts,
-generated tar archives, a fake `fetch`, a fake browser/module-loader sandbox,
-and a fake Cordis context. No network or real `rtk` is required.
-[.github/workflows/ci.yml](../.github/workflows/ci.yml) runs it with the coverage
-thresholds on every push and pull request;
-[.github/workflows/install-smoke.yml](../.github/workflows/install-smoke.yml)
-runs the network smoke on demand.
+a fake browser/module-loader sandbox, and a fake Cordis context. No network or
+real `rtk` is required. [.github/workflows/ci.yml](../.github/workflows/ci.yml)
+runs it with the coverage thresholds on every push and pull request.
 
 ## Extending
 
