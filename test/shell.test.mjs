@@ -106,14 +106,14 @@ test('the PATH overlay leaves the command untouched without a prefix', () => {
 test('the PATH overlay prepends the installed binary directory once and keeps the command', () => {
   assert.equal(
     withRtkPath('rtk git status', '/cache/rtk-filter/versions/rtk/1.2.0'),
-    `__rtk_prefix='/cache/rtk-filter/versions/rtk/1.2.0'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk git status`,
+    `__rtk_prefix='/cache/rtk-filter/versions/rtk/1.2.0'; case "$PATH" in "$__rtk_prefix"|"$__rtk_prefix":*) ;; *) export PATH="$__rtk_prefix\${PATH:+:$PATH}" ;; esac; rtk git status`,
   )
 })
 
 test('the PATH overlay quotes embedded single quotes', () => {
   assert.equal(
     withRtkPath('rtk gain', "/cache/it's-rtk"),
-    `__rtk_prefix='/cache/it'\\''s-rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk gain`,
+    `__rtk_prefix='/cache/it'\\''s-rtk'; case "$PATH" in "$__rtk_prefix"|"$__rtk_prefix":*) ;; *) export PATH="$__rtk_prefix\${PATH:+:$PATH}" ;; esac; rtk gain`,
   )
 })
 

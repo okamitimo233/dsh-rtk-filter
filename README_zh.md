@@ -157,13 +157,14 @@ dsh --profile web --dump-config | grep -A5 "rtk-filter"
 
 继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当 RTK 来自绝对安装路径时，影子会确保每个
 委托命令的 `PATH` 都包含该安装目录，包括 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
-`rtk` 调用。仅当该目录尚未作为完整条目出现在 `PATH` 中时，才将其前置：
+`rtk` 调用。除非该目录已经是 `PATH` 的首项，否则会将其移到首位；同一持久 shell
+中的重复调用不会重复添加：
 
 ```
 __rtk_prefix='<binary-dir>'
-case ":$PATH:" in
-  *":$__rtk_prefix:"*) ;;
-  *) export PATH="$__rtk_prefix:$PATH" ;;
+case "$PATH" in
+  "$__rtk_prefix"|"$__rtk_prefix":*) ;;
+  *) export PATH="$__rtk_prefix${PATH:+:$PATH}" ;;
 esac
 <command>
 ```

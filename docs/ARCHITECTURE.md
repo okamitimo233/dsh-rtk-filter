@@ -177,7 +177,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 - **The PATH overlay must stay idempotent.** The persistent shell keeps its
   environment across calls, so prepending a binary directory unconditionally
   grows `PATH` once per call. `withRtkPath` keeps the directory in
-  `__rtk_prefix` and adds it only when absent.
+  `__rtk_prefix` and keeps it first, without adding it again on repeated calls.
 - **The PATH overlay is for the absolute official install path only.** A bare
   `rtk` source is already resolved from the inherited bash environment.
 - **Rewrite with the session working directory and no shell.** `rewriteCommand`

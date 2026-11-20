@@ -82,7 +82,7 @@ model calls bash(command)
 
 获取顺序：Host `PATH` 上的 `rtk` > 官方安装位置 `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk` > 运行官方安装脚本。只有前两者都不可用时才安装，安装后再 probe 绝对路径。
 
-自动安装时，`lib/installer.js` 通过 HTTPS 拉取 RTK 官方 `install.sh`，在临时目录执行。下载和执行共用 30 秒总 deadline，避免离线启动阻塞数分钟；安装脚本的流式读取受大小上限保护，`RTK_INSTALL_DIR` 只归一化一次并在子进程环境与 probe 路径间复用。插件不保留私有缓存、不做后台更新、不回收全局安装。安装或替换 RTK 后需要重新加载/重启 Host。绝对安装路径生效时，影子在每条委托命令前加幂等 PATH 覆盖层（目录存 `__rtk_prefix`，用 `case ":$PATH:"` 判重）：`lib/shell.js` 的 `withRtkPath` 是唯一实现；裸 `rtk` 来源不覆盖。
+自动安装时，`lib/installer.js` 通过 HTTPS 拉取 RTK 官方 `install.sh`，在临时目录执行。下载和执行共用 30 秒总 deadline，避免离线启动阻塞数分钟；安装脚本的流式读取受大小上限保护，`RTK_INSTALL_DIR` 只归一化一次并在子进程环境与 probe 路径间复用。插件不保留私有缓存、不做后台更新、不回收全局安装。安装或替换 RTK 后需要重新加载/重启 Host。绝对安装路径生效时，影子在每条委托命令前加幂等 PATH 覆盖层（目录存 `__rtk_prefix`，用 `case "$PATH"` 确保该目录位于首位）：`lib/shell.js` 的 `withRtkPath` 是唯一实现；裸 `rtk` 来源不覆盖。
 
 ### 设置页
 
