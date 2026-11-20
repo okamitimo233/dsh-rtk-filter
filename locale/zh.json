@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "RTK 命令过滤",
-    "description": "让 bash 命令经过 RTK 执行并返回压缩后的输出，自行安装和更新 RTK 二进制，并在 DSH 设置页提供 RTK 状态与配置侧栏。"
+    "description": "让 bash 命令经过 RTK 执行并返回压缩后的输出。没有可用的 RTK 二进制时会安装 RTK，并在 DSH 设置中提供 RTK 状态页。"
   }
 }

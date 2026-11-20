@@ -9,7 +9,7 @@
 
 import { activate } from './lib/activate.js'
 import { buildConfigSchema } from './lib/config.js'
-import { abortError } from './lib/proc.js'
+import { toolAbortedError } from './lib/proc.js'
 import { probeRtk, rewriteCommand } from './lib/rewrite.js'
 import { createBashShadow } from './lib/shadow.js'
 import { installOfficialRtk } from './lib/installer.js'
@@ -46,7 +46,7 @@ export const Config = await loadConfigSchema()
  * The abort contract is shared through `lib/proc.js`; the shared pipeline
  * renders its message like any other tool failure.
  */
-export const toolAborted = () => abortError('tool call aborted', 'ABORTED')
+export const toolAborted = toolAbortedError
 
 export function apply(ctx, config = {}) {
   return activate(ctx, config, {

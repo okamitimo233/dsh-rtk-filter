@@ -46,7 +46,7 @@ semantics:
 | Filter | `lib/shadow.js` | The same-named `bash` definition: getter mirroring and delegation. |
 | Filter | `lib/rewrite.js` | `probeRtk`, the pure `interpretRewrite` exit-code protocol, and `rewriteCommand`. |
 | Filter | `lib/proc.js` | Child-process execution, the abort-error contract, error text. The only place they are defined. |
-| Utilities | `lib/version.js` | Version parse/compare and the minimum `rtk rewrite` gate. |
+| Utilities | `lib/version.js` | Version parse/format and the minimum `rtk rewrite` gate. |
 | Settings | `lib/status.js` | `rtk gain` folding, runtime badge projection (`projectRuntime`), pure payload builder, thin same-origin JSON route. |
 | Settings | `lib/client.js` | Hand-written browser bundle: registers the settings section and zh/en dictionaries. |
 
@@ -119,7 +119,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 | Concept | Owner |
 |---|---|
 | Option defaults and clamps | `lib/config.js` (`OPTIONS`) |
-| Binary source precedence | `lib/manager.js` (`resolveSource`) |
+| Binary source precedence | `lib/manager.js` (probe and install order in `createRtkManager`) |
 | Official install-script URL and execution | `lib/installer.js` |
 | Preset shell shape policy | `lib/shell.js` (`PRESET_SHELLS`) |
 | PATH overlay command | `lib/shell.js` (`withRtkPath`) |
@@ -177,7 +177,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 - **The PATH overlay must stay idempotent.** The persistent shell keeps its
   environment across calls, so prepending a binary directory unconditionally
   grows `PATH` once per call. `withRtkPath` keeps the directory in
-  `__rtk_prefix` and adds it only when absent.
+  `__rtk_prefix` and keeps it first, without adding it again on repeated calls.
 - **The PATH overlay is for the absolute official install path only.** A bare
   `rtk` source is already resolved from the inherited bash environment.
 - **Rewrite with the session working directory and no shell.** `rewriteCommand`
@@ -186,8 +186,8 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
   `RTK_REWRITE_HOST`; exit 3 is safe because DSH already gated the bash call.
 - **Two abort codes, one contract.** Process cancellation uses `abortError()`
   (`ABORT_ERR`) from `lib/proc.js`; a cancelled tool call uses
-  `abortError('tool call aborted', 'ABORTED')` in `index.js`. Both carry
-  `name = 'AbortError'` for Host rendering.
+  `toolAbortedError()` (`ABORTED`) from the same module, re-exported by
+  `index.js`. Both carry `name = 'AbortError'` for Host rendering.
 - **The session log keeps the model's command.** `tool/call` records the
   original text; only `logRewrites: true` logs the rewritten pair.
 - **Windows/pwsh is not covered.** Only the POSIX `bash` tool is shadowed.
