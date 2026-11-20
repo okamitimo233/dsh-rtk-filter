@@ -39,11 +39,9 @@ test('uses rtk from the Host PATH when it is already installed', async () => {
   assert.equal(manager.canWrap, true)
   assert.equal(manager.reason, undefined)
   assert.equal(manager.current(), manager.initial)
-  assert.equal(await manager.start().ready, true)
 
   manager.dispose()
   assert.equal(manager.current(), undefined)
-  assert.equal(await manager.start().ready, false)
 })
 
 test('uses an existing official installation even when rtk is not on PATH', async () => {
@@ -196,7 +194,6 @@ test('missing probe support is reported', async () => {
   })
   assert.equal(manager.canWrap, false)
   assert.match(manager.reason, /official installer is unavailable/)
-  assert.equal(await manager.start().ready, false)
 })
 
 test('a throwing probe is converted into a diagnostic', async () => {

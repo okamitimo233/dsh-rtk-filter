@@ -9,8 +9,10 @@ implementation's job.
 The plugin resolves one external executable at activation time. It checks
 `rtk` on the Host PATH, then the official install path
 `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk`. If neither is usable it runs RTK's
-official upstream install script once. The plugin keeps no private cache and
-does not update RTK in the background.
+official upstream install script once. That one-time download plus execution
+shares a 30-second deadline so an unavailable network cannot stall activation
+for minutes. The plugin keeps no private cache and does not update RTK in the
+background.
 
 The commit history behind this design is in [COMMIT_REVIEW.md](COMMIT_REVIEW.md).
 This file describes the current module boundaries and the rules that keep them
@@ -63,7 +65,9 @@ semantics:
 5. **Installation is delegated to the official script.** `manager.js` may
    invoke `installer.js` only when neither the PATH nor the existing official
    install path works. It must not implement a private download/cache/update
-   pipeline. `installer.js` writes no long-lived state.
+   pipeline. `installer.js` writes no long-lived state, streams the script
+   through a size cap, removes its staging directory, and uses one normalized
+   `RTK_INSTALL_DIR` for both the child environment and the returned probe path.
 
 ## Data flow
 
@@ -197,6 +201,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # same suite; fails below 100% line/branch/function coverage
+npm run smoke     # manual real-network install through the upstream script
 ```
 
 The unit suite uses only Node built-ins and fixtures: fake `rtk` shell scripts,

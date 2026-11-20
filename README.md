@@ -106,8 +106,11 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
 ```
 
   It installs `~/.local/bin/rtk` by default; use `RTK_INSTALL_DIR` to override
-  the directory. After installation the plugin invokes the absolute path, so
-  adding that directory to `PATH` is convenient but not required.
+  the directory. The plugin normalizes that value once, passes the same
+  absolute directory to the installer, and invokes the installed absolute path,
+  so adding the directory to `PATH` is convenient but not required. The whole
+  download plus install operation is bounded to 30 seconds, so an offline or
+  restricted network cannot stall Host startup for minutes.
 
 If installation fails, the plugin logs a warning and stays inert: bash and the
 prompt are unchanged.
@@ -271,7 +274,8 @@ Additional rules:
   HTTPS and relies on that script's own release checksum verification.
 - **No background updates**: an existing RTK is never updated by the plugin.
   Installation runs only when neither the PATH nor the official install path
-  contains a usable binary.
+  contains a usable binary. Automatic installation has a single 30-second
+  deadline covering both the script download and execution.
 - **Activation**: the binary is probed once during activation. Install or
   replace RTK, then reload/restart the Host so the new executable is picked up.
 
@@ -285,7 +289,11 @@ every push and pull request:
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # the same suite with 100% line/branch/function thresholds
+npm run smoke     # manual real-network install through the upstream script
 ```
+
+The unit suite never touches the network. The smoke command is for manual or
+workflow-dispatch verification and installs RTK into a temporary directory.
 
 ## Handoff
 

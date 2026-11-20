@@ -97,8 +97,10 @@ flowchart TB
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 ```
 
-  默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。安装后插件使用
-  绝对路径调用，因此不要求该目录在 `PATH` 中。
+  默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。插件会把该值
+  归一化为绝对路径，把同一个目录传给官方安装脚本，并用安装后的绝对路径调用，
+  因此不要求该目录在 `PATH` 中。下载和执行安装脚本共用一个 30 秒总 deadline，
+  离线或网络受限时不会让 Host 启动卡住数分钟。
 
 如果安装失败，插件会记录警告并保持惰性：bash 和 prompt 都不变。
 
@@ -231,7 +233,7 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 - **信任**：自动安装会通过 HTTPS 执行上游 `install.sh`，并依赖该脚本自身的 release
   checksum 校验。
 - **不后台更新**：插件不会更新已有 RTK；只有 PATH 和官方安装位置都没有可用二进制时
-  才自动安装。
+  才自动安装。自动安装的脚本下载与执行共用一个 30 秒总 deadline。
 - **激活时机**：二进制在激活时探测一次。安装或替换 RTK 后，需要重新加载/重启 Host
   以便重新解析。
 
@@ -244,7 +246,11 @@ push/PR 上运行：
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # 同一套测试 + 行/分支/函数 100% 阈值
+npm run smoke     # 手动真实网络安装，走上游官方安装脚本
 ```
+
+单元测试不访问网络；smoke 用于手动或 workflow_dispatch 验证，会把 RTK 安装到
+临时目录。
 
 ## Handoff
 
