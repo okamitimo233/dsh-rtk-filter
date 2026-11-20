@@ -103,7 +103,7 @@ test('the PATH overlay leaves the command untouched without a prefix', () => {
   assert.equal(withRtkPath('/usr/bin/rtk --version'), '/usr/bin/rtk --version')
 })
 
-test('the PATH overlay prepends the explicit binary directory once and keeps the command', () => {
+test('the PATH overlay prepends the installed binary directory once and keeps the command', () => {
   assert.equal(
     withRtkPath('rtk git status', '/cache/rtk-filter/versions/rtk/1.2.0'),
     `__rtk_prefix='/cache/rtk-filter/versions/rtk/1.2.0'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; rtk git status`,

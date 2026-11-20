@@ -35,7 +35,7 @@ test('loadConfigSchema builds the schema when the package resolves', async () =>
   }
   const schema = await loadConfigSchema(async () => ({ default: z }))
   assert.equal(typeof schema.shape.enabled.defaultValue, 'boolean')
-  assert.equal(typeof schema.shape.binary.defaultValue, 'string')
+  assert.equal(typeof schema.shape.rewriteTimeoutMs.defaultValue, 'number')
 
   assert.equal(await loadConfigSchema(async () => { throw new Error('missing') }), undefined)
 })

@@ -62,7 +62,7 @@ function captureRoute(overrides = {}) {
         return () => {}
       },
     },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'installed' }),
     getBinary: () => '/opt/rtk',
     readStatus: async (input) => {
       calls.push(input)
@@ -184,7 +184,7 @@ test('the status route answers JSON and marks HEAD as bodyless', async () => {
   const dispose = registerStatusRoute({
     ctx: { get: () => undefined },
     webServer,
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'installed' }),
     getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
@@ -234,7 +234,7 @@ test('the status route honors Connection rejection and method limits', async () 
   registerStatusRoute({
     ctx: { get: () => ({ requestRejection: () => 403 }) },
     webServer: { register(route) { routes.push(route); return () => {} } },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'installed' }),
     getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
@@ -250,7 +250,7 @@ test('the status route honors Connection rejection and method limits', async () 
   await registerStatusRoute({
     ctx,
     webServer: { register(registered) { route.handler = registered.handler; return () => {} } },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'installed' }),
     getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
@@ -322,7 +322,7 @@ test('buildStatusPayload shapes the wire body and normalizes statsError', () => 
   const stats = aggregateGain({
     daily: [{ date: '2026-11-10', commands: 2, input_tokens: 100, output_tokens: 25, saved_tokens: 75 }],
   }, { days: 2, now: NOW })
-  const runtime = { state: 'ready', version: '1.2.0', source: 'explicit' }
+  const runtime = { state: 'ready', version: '1.2.0', source: 'installed' }
   const payload = buildStatusPayload({ runtime, stats, generatedAt: NOW })
 
   assert.deepEqual(payload, {
@@ -342,7 +342,7 @@ test('buildStatusPayload shapes the wire body and normalizes statsError', () => 
 })
 
 test('readRuntimeSafe falls back when the provider throws', () => {
-  const ready = { state: 'ready', version: '1.2.0', source: 'explicit' }
+  const ready = { state: 'ready', version: '1.2.0', source: 'installed' }
   assert.deepEqual(readRuntimeSafe(() => ready), ready)
   assert.deepEqual(readRuntimeSafe(() => { throw new Error('runtime down') }), {
     state: 'unavailable',
@@ -352,17 +352,17 @@ test('readRuntimeSafe falls back when the provider throws', () => {
 })
 
 test('projectRuntime maps manager state to the page badge', () => {
-  assert.deepEqual(projectRuntime({ available: true, version: '1.2.0', source: 'explicit' }), {
+  assert.deepEqual(projectRuntime({ available: true, version: '1.2.0', source: 'installed' }), {
     state: 'ready',
     version: '1.2.0',
-    source: 'explicit',
+    source: 'installed',
   })
   assert.deepEqual(projectRuntime({ available: true }), {
     state: 'ready',
     version: null,
     source: null,
   })
-  assert.deepEqual(projectRuntime({ available: false, version: '1.2.0', source: 'explicit' }), {
+  assert.deepEqual(projectRuntime({ available: false, version: '1.2.0', source: 'installed' }), {
     state: 'unavailable',
     version: null,
     source: null,

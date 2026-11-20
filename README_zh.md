@@ -9,9 +9,9 @@
 agent 作用域的 `bash` 工具来遮蔽内置工具，把每条受支持的命令改写为对应的 `rtk` 形式，
 然后委托给原始 bash 实现执行。
 
-插件会优先使用已有的 RTK：`RTK_BIN` / 显式 `binary`，否则使用 Host `PATH` 上的 `rtk`。
-如果都不可用，插件可以运行一次 RTK 官方安装脚本，把普通全局二进制安装到
-`${RTK_INSTALL_DIR:-$HOME/.local/bin}`。插件不保留私有二进制缓存，也不会后台更新 RTK。
+插件会优先使用已有的 RTK：Host `PATH` 上的 `rtk`，或官方安装位置
+`${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk`。如果两者都不存在，插件会运行一次 RTK
+官方安装脚本，然后使用安装好的二进制。插件不保留私有二进制缓存，也不会后台更新 RTK。
 
 由于执行最终委托回内置工具，沙箱、审批、后台任务、超时、输出渲染、溢出文件以及
 `[exit code: N]` 标记的行为都与之前完全一致。发生变化的只有实际执行的命令、可能的
@@ -65,7 +65,7 @@ flowchart TB
         Web["Web 服务器<br/>Connection 信任检查"]
     end
 
-    RTK["已有 rtk 二进制<br/>PATH 或显式路径"]
+    RTK["RTK 二进制<br/>PATH 或官方安装"]
     Browser["设置页<br/>lib/client.js"]
 
     Model -->|"调用"| Shadow
@@ -90,9 +90,8 @@ flowchart TB
 ## 环境要求
 
 - POSIX `bash`（即内置 `bash` 工具）。不覆盖 Windows 的 `pwsh`。
-- 需要 RTK >= 0.23.0（即引入 `rtk rewrite` 的版本），并满足以下任一来源：
-  Host `PATH` 上的 `rtk`、显式 `binary`、或 `RTK_BIN`。
-- 如果以上都没有且启用了 `autoInstall`（默认），插件会运行官方 quick install：
+- 需要 RTK >= 0.23.0（即引入 `rtk rewrite` 的版本）。
+- 如果本机还没有 RTK，插件会运行官方 quick install：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
@@ -101,8 +100,7 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
   默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。安装后插件使用
   绝对路径调用，因此不要求该目录在 `PATH` 中。
 
-如果安装失败、或关闭了 `autoInstall` 且没有可用二进制，插件会记录警告并保持惰性：
-bash 和 prompt 都不变。
+如果安装失败，插件会记录警告并保持惰性：bash 和 prompt 都不变。
 
 ## 安装
 
@@ -117,25 +115,23 @@ bash 和 prompt 都不变。
 
 用 `plugin_manager` 的 `action: remove_bundle` 卸载。
 
-安装 bundle 后，确认 Host 能解析到 RTK。插件在激活时探测一次；替换二进制或修改 PATH 后
-需要重新加载/重启 Host。
+安装 bundle 后不需要额外安装 RTK。插件在激活时检查 Host `PATH` 和官方安装位置，
+两者都不存在时才用官方脚本安装。替换二进制或修改 PATH 后需要重新加载/重启 Host。
 
 ## RTK 二进制解析
 
 ### 优先级
 
-1. Host 环境中的 `RTK_BIN`，或非默认的 `binary` 配置：原样使用该显式可执行文件。
-2. 否则使用 Host `PATH` 上的裸 `rtk` 命令。
-3. 如果 PATH 上也没有可用二进制且启用了 `autoInstall`，运行 RTK 官方安装脚本，
-   并 probe 安装后的绝对路径。
+1. Host `PATH` 上的裸 `rtk` 命令。
+2. 上一次官方安装在 `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk` 的二进制。
+3. 如果两者都不可用，运行 RTK 官方安装脚本，并 probe 安装后的绝对路径。
 
-显式二进制不可用时不会回退到 `PATH` 或安装器。插件不保留私有副本、不后台更新 RTK，
-也不回收全局安装。
+这就是全部获取规则。插件不保留私有副本、不后台更新 RTK，也不回收全局安装。
 
 ### PATH 覆盖层
 
-继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当选中的是绝对路径的显式二进制时，影子会为
-每个委托命令把其所在目录前置到 `PATH`，使 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
+继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当 RTK 来自绝对安装路径时，影子会为每个
+委托命令把其所在目录前置到 `PATH`，使 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
 `rtk` 调用都使用同一个可执行文件：
 
 ```
@@ -152,8 +148,6 @@ export PATH='<binary-dir>':"$PATH"; <command>
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    binary: rtk                        # 默认: rtk（Host PATH）
-    autoInstall: true                  # 默认: true
     awareness: true                    # 默认: true
     rewriteTimeoutMs: 2000             # 默认: 2000
     logRewrites: false                 # 默认: false
@@ -163,8 +157,6 @@ export PATH='<binary-dir>':"$PATH"; <command>
 |---|---|---|
 | `enabled` | `true` | 在不移除插件的情况下将其关闭。 |
 | `awareness` | `true` | 添加关于压缩输出的简短 system prompt 章节。 |
-| `binary` | `rtk` | RTK 可执行文件。默认使用 Host `PATH`；绝对路径表示显式二进制。`RTK_BIN` 优先。 |
-| `autoInstall` | `true` | 当显式/PATH 都没有可用二进制时，运行 RTK 官方安装脚本。 |
 | `rewriteTimeoutMs` | `2000` | 单次 `rtk rewrite` 调用的超时；超时后执行原命令。 |
 | `logRewrites` | `false` | 向 Host 日志记录 `[rtk] <original> -> <rewritten>`。 |
 
@@ -201,7 +193,7 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 
 其他规则：
 
-- 已经以 `rtk` 开头的命令不会被改写（避免递归）；显式绝对路径二进制生效时 `PATH` 覆盖层仍然应用。
+- 已经以 `rtk` 开头的命令不会被改写（避免递归）；RTK 来自绝对安装路径时 `PATH` 覆盖层仍然应用。
 - Host 环境中的 `RTK_DISABLED=1` 会完全跳过插件激活。
   单条命令前缀 `RTK_DISABLED=1 <cmd>` 由 `rtk rewrite` 自身跳过，原样执行。
 - `rtk rewrite` 以会话的工作目录运行，因此项目本地的权限规则会像普通命令那样解析。
@@ -237,8 +229,9 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 - **二进制归属**：插件不保留私有 RTK 副本。需要引导安装时，它运行官方安装脚本，
   把普通全局可执行文件写到 `${RTK_INSTALL_DIR:-$HOME/.local/bin}`。
 - **信任**：自动安装会通过 HTTPS 执行上游 `install.sh`，并依赖该脚本自身的 release
-  checksum 校验。不允许下载或执行该脚本的环境应关闭 `autoInstall`。
-- **不后台更新**：插件不会更新已有 RTK；只有显式/PATH 均无可用二进制时才自动安装。
+  checksum 校验。
+- **不后台更新**：插件不会更新已有 RTK；只有 PATH 和官方安装位置都没有可用二进制时
+  才自动安装。
 - **激活时机**：二进制在激活时探测一次。安装或替换 RTK 后，需要重新加载/重启 Host
   以便重新解析。
 

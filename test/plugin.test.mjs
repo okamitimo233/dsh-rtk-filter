@@ -5,12 +5,9 @@ import { activate } from '../lib/activate.js'
 import { awarenessText, shellOnlyNote } from '../lib/awareness.js'
 import { aggregateGain, STATUS_PATH } from '../lib/status.js'
 
-const originalBin = process.env.RTK_BIN
 const originalDisabled = process.env.RTK_DISABLED
 
 afterEach(() => {
-  if (originalBin === undefined) delete process.env.RTK_BIN
-  else process.env.RTK_BIN = originalBin
   if (originalDisabled === undefined) delete process.env.RTK_DISABLED
   else process.env.RTK_DISABLED = originalDisabled
 })
@@ -88,7 +85,7 @@ function standardBash() {
 const defaultInitial = {
   binary: '/home/plana/.local/bin/rtk',
   prefixDir: '/home/plana/.local/bin',
-  source: 'explicit',
+  source: 'installed',
   version: { major: 1, minor: 2, patch: 0 },
   versionText: '1.2.0',
 }
@@ -253,7 +250,6 @@ test('registers the awareness section and an agent-scoped bash shadow', async ()
   // must not be told otherwise.
   assert.doesNotMatch(section.text, /cd \/path/)
 
-  assert.equal(harness.settings[0].binary, 'rtk')
   assert.equal(harness.shadowCalls.length, 1)
   assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
   assert.match(harness.infos.join('\n'), /filtering bash output through \/home\/plana\/.local\/bin\/rtk/)
@@ -363,7 +359,7 @@ test('rewrite uses the manager current binary and prefix', async () => {
   state.current = {
     binary: '/opt/rtk',
     prefixDir: '/opt',
-    source: 'explicit',
+    source: 'installed',
     version: { major: 1, minor: 3, patch: 0 },
     versionText: '1.3.0',
   }
@@ -378,23 +374,17 @@ test('config defaults reach the manager', async () => {
   const settings = harness.settings[0]
   assert.equal(settings.enabled, true)
   assert.equal(settings.awareness, true)
-  assert.equal(settings.binary, 'rtk')
-  assert.equal(settings.autoInstall, true)
   assert.equal(settings.rewriteTimeoutMs, 2000)
   assert.equal(settings.logRewrites, false)
 })
 
-test('explicit config reaches the manager unchanged', async () => {
+test('runtime config reaches the manager unchanged', async () => {
   const harness = makeCtx()
   await activateWith(harness, {
-    binary: '/opt/rtk',
-    autoInstall: false,
     rewriteTimeoutMs: 5000,
     logRewrites: true,
   }, makeManager().manager)
   const settings = harness.settings[0]
-  assert.equal(settings.binary, '/opt/rtk')
-  assert.equal(settings.autoInstall, false)
   assert.equal(settings.rewriteTimeoutMs, 5000)
   assert.equal(settings.logRewrites, true)
 })
@@ -405,15 +395,12 @@ test('malformed config values fall back to the documented defaults', async () =>
     enabled: 0,
     awareness: 1,
     binary: '   ',
-    autoInstall: 0,
     rewriteTimeoutMs: 0,
     logRewrites: 'yes',
   }, makeManager().manager)
   const settings = harness.settings[0]
   assert.equal(settings.enabled, true)
   assert.equal(settings.awareness, true)
-  assert.equal(settings.binary, 'rtk')
-  assert.equal(settings.autoInstall, true)
   assert.equal(settings.rewriteTimeoutMs, 2000)
   assert.equal(settings.logRewrites, false)
 })
@@ -535,7 +522,7 @@ test('registers a status route when the web server is present', async () => {
   const payload = JSON.parse(res.body)
   assert.equal(payload.runtime.state, 'ready')
   assert.equal(payload.runtime.version, '1.2.0')
-  assert.equal(payload.runtime.source, 'explicit')
+  assert.equal(payload.runtime.source, 'installed')
   assert.equal(payload.summary.calls, 4)
   assert.equal(payload.summary.savedTokens, 300)
 })

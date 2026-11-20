@@ -185,7 +185,7 @@ test('a missing inherited bash tool fails visibly', async () => {
   )
 })
 
-test('prepends the explicit rtk directory to rewritten commands', async () => {
+test('prepends the installed rtk directory to rewritten commands', async () => {
   const harness = makeHarness({
     outcome: { kind: 'rewrite', command: 'rtk git status' },
     getPathPrefix: () => '/cache/rtk-filter/versions/rtk/1.2.0',
@@ -197,13 +197,13 @@ test('prepends the explicit rtk directory to rewritten commands', async () => {
   )
 })
 
-test('prepends the explicit rtk directory to pass-through commands', async () => {
+test('prepends the installed rtk directory to pass-through commands', async () => {
   const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
   await harness.shadow.execute({ command: 'echo hello', description: 'Greeting' }, {})
   assert.equal(harness.calls[0].args.command, `__rtk_prefix='/cache/rtk'; case ":$PATH:" in *":$__rtk_prefix:"*) ;; *) export PATH="$__rtk_prefix:$PATH" ;; esac; echo hello`)
 })
 
-test('prepends the explicit rtk directory to commands already using rtk', async () => {
+test('prepends the installed rtk directory to commands already using rtk', async () => {
   const harness = makeHarness({ getPathPrefix: () => '/cache/rtk' })
   await harness.shadow.execute({ command: 'rtk gain', description: 'Gain' }, {})
   assert.equal(harness.rewriteCalls.length, 0)

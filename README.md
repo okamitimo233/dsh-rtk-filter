@@ -10,11 +10,11 @@ changes no tool schema: it registers an agent-scoped `bash` tool that shadows
 the built-in one, rewrites each supported command to its `rtk` equivalent, and
 then delegates to the original bash implementation.
 
-The plugin uses an existing RTK executable when one is available: `RTK_BIN`
-or an explicit `binary`, otherwise `rtk` from the Host `PATH`. If none is
-usable, it can run the official upstream install script once, which installs a
-normal global binary under `${RTK_INSTALL_DIR:-$HOME/.local/bin}`. The plugin
-keeps no private binary cache and does not update RTK in the background.
+The plugin uses an existing RTK executable when one is available, either as
+`rtk` on the Host `PATH` or at the official install path
+`${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk`. If neither exists, it runs the
+official upstream install script once, then uses the installed binary. The
+plugin keeps no private binary cache and does not update RTK in the background.
 
 Because execution delegates back to the built-in tool, sandboxing, approval,
 background jobs, timeouts, output rendering, spill files, and `[exit code: N]`
@@ -71,7 +71,7 @@ flowchart TB
         Web["Web server<br/>Connection trust fence"]
     end
 
-    RTK["existing rtk binary<br/>PATH or explicit"]
+    RTK["RTK binary<br/>PATH or official install"]
     Browser["Settings UI<br/>lib/client.js"]
 
     Model -->|"calls"| Shadow
@@ -97,10 +97,9 @@ single-sources-of-truth are in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Requirements
 
 - POSIX `bash` (the built-in `bash` tool). Windows `pwsh` is not covered.
-- RTK >= 0.23.0 (`rtk rewrite` was introduced there), available as `rtk` on
-  the Host `PATH`, through an explicit `binary`, or through `RTK_BIN`.
-- When none of those exists and `autoInstall` is enabled (default), the plugin
-  runs the official quick install itself:
+- RTK >= 0.23.0 (`rtk rewrite` was introduced there).
+- If RTK is not already available, the plugin runs the official quick install
+  itself:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
@@ -110,8 +109,8 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
   the directory. After installation the plugin invokes the absolute path, so
   adding that directory to `PATH` is convenient but not required.
 
-If installation fails, or `autoInstall` is disabled and no binary exists, the
-plugin logs a warning and stays inert: bash and the prompt are unchanged.
+If installation fails, the plugin logs a warning and stays inert: bash and the
+prompt are unchanged.
 
 ## Install
 
@@ -127,30 +126,30 @@ this repository directory as `target`. The bundle patch inserts one row:
 
 Remove it with `plugin_manager` `action: remove_bundle`.
 
-After installing the bundle, make sure the Host can resolve RTK. The plugin
-probes it once during activation; a changed binary or PATH requires a Host
-reload/restart.
+After installing the bundle, no separate RTK setup is required. The plugin
+checks the Host `PATH` and the official install path during activation, and
+installs RTK with the official script only when both are missing. A changed
+binary or PATH requires a Host reload/restart.
 
 ## RTK binary resolution
 
 ### Precedence
 
-1. `RTK_BIN` in the Host environment, or a non-default `binary` config:
-   use that explicit executable as-is.
-2. Otherwise, the bare `rtk` command from the Host `PATH`.
-3. If no usable PATH binary exists and `autoInstall` is enabled, run the
-   official upstream install script and probe the installed absolute path.
+1. The bare `rtk` command from the Host `PATH`.
+2. `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk` from a previous official install.
+3. If neither is usable, run the official upstream install script and probe
+   the installed absolute path.
 
-There is no fallback from a broken explicit binary to `PATH` or to the
-installer. The plugin never keeps a private copy, never updates RTK in the
-background, and never garbage-collects global installations.
+That is the whole acquisition rule. The plugin never keeps a private copy,
+never updates RTK in the background, and never garbage-collects global
+installations.
 
 ### PATH overlay
 
-The inherited bash tool resolves `rtk` from its own `PATH`. When the selected
-source is an absolute explicit binary, the shadow prepends its directory for
-each delegated command so `rtk`, `rtk bypass ...`, and `rtk` calls inside
-compound commands and scripts use the same executable:
+The inherited bash tool resolves `rtk` from its own `PATH`. When RTK comes from
+an absolute install path, the shadow prepends its directory for each delegated
+command so `rtk`, `rtk bypass ...`, and `rtk` calls inside compound commands and
+scripts use the same executable:
 
 ```
 export PATH='<binary-dir>':"$PATH"; <command>
@@ -168,8 +167,6 @@ and set `config`:
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    binary: rtk                        # default: rtk (Host PATH)
-    autoInstall: true                  # default: true
     awareness: true                    # default: true
     rewriteTimeoutMs: 2000             # default: 2000
     logRewrites: false                 # default: false
@@ -179,8 +176,6 @@ and set `config`:
 |---|---|---|
 | `enabled` | `true` | Turn the plugin off without removing it. |
 | `awareness` | `true` | Add the short system-prompt section about condensed output. |
-| `binary` | `rtk` | RTK executable. The default uses Host `PATH`; an absolute path selects an explicit binary. `RTK_BIN` takes precedence. |
-| `autoInstall` | `true` | When no explicit or PATH binary is usable, run the official upstream install script. |
 | `rewriteTimeoutMs` | `2000` | Timeout for one `rtk rewrite` call; on timeout the original command runs. |
 | `logRewrites` | `false` | Log `[rtk] <original> -> <rewritten>` to the Host log. |
 
@@ -226,7 +221,7 @@ same way the Pi/OMP and Hermes delegates do, without setting
 Additional rules:
 
 - Commands that already start with `rtk` are not rewritten (no recursion); the
-  `PATH` overlay still applies for an absolute explicit binary.
+  `PATH` overlay still applies when RTK comes from an absolute install path.
 - `RTK_DISABLED=1` in the Host environment skips plugin activation entirely.
   A per-command `RTK_DISABLED=1 <cmd>` prefix is skipped by `rtk rewrite`
   itself and runs unchanged.
@@ -273,11 +268,10 @@ Additional rules:
   RTK, it runs the official installer, which writes a normal global executable
   under `${RTK_INSTALL_DIR:-$HOME/.local/bin}`.
 - **Trust**: automatic installation executes the upstream `install.sh` over
-  HTTPS and relies on that script's own release checksum verification. Disable
-  `autoInstall` in environments where downloading or executing that script is
-  not allowed.
+  HTTPS and relies on that script's own release checksum verification.
 - **No background updates**: an existing RTK is never updated by the plugin.
-  Auto-install runs only when no usable explicit or PATH binary exists.
+  Installation runs only when neither the PATH nor the official install path
+  contains a usable binary.
 - **Activation**: the binary is probed once during activation. Install or
   replace RTK, then reload/restart the Host so the new executable is picked up.
 
