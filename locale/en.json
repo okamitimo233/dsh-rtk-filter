@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "RTK command filtering",
-    "description": "Runs bash commands through RTK, returns condensed output, installs and updates its own RTK binary, and adds an RTK status/config section to DSH Settings."
+    "description": "Runs bash commands through RTK and returns condensed output. Installs RTK if no usable binary is available and provides an RTK status page in DSH Settings."
   }
 }

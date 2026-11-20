@@ -155,12 +155,17 @@ dsh --profile web --dump-config | grep -A5 "rtk-filter"
 
 ### PATH 覆盖层
 
-继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当 RTK 来自绝对安装路径时，影子会为每个
-委托命令把其所在目录前置到 `PATH`，使 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
-`rtk` 调用都使用同一个可执行文件：
+继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当 RTK 来自绝对安装路径时，影子会确保每个
+委托命令的 `PATH` 都包含该安装目录，包括 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
+`rtk` 调用。仅当该目录尚未作为完整条目出现在 `PATH` 中时，才将其前置：
 
 ```
-export PATH='<binary-dir>':"$PATH"; <command>
+__rtk_prefix='<binary-dir>'
+case ":$PATH:" in
+  *":$__rtk_prefix:"*) ;;
+  *) export PATH="$__rtk_prefix:$PATH" ;;
+esac
+<command>
 ```
 
 当来源是 `PATH` 上的裸 `rtk`、命令为空、RTK 被禁用，或没有解析到二进制时不应用覆盖层。

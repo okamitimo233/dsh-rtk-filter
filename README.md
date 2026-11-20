@@ -173,12 +173,18 @@ activation; exports made inside a `bash` tool call, including a modified
 ### PATH overlay
 
 The inherited bash tool resolves `rtk` from its own `PATH`. When RTK comes from
-an absolute install path, the shadow prepends its directory for each delegated
-command so `rtk`, `rtk bypass ...`, and `rtk` calls inside compound commands and
-scripts use the same executable:
+an absolute install path, the shadow makes its directory available on `PATH`
+for each delegated command, including `rtk`, `rtk bypass ...`, and `rtk` calls
+inside compound commands and scripts. It prepends the directory only if it is
+not already a complete entry in `PATH`:
 
 ```
-export PATH='<binary-dir>':"$PATH"; <command>
+__rtk_prefix='<binary-dir>'
+case ":$PATH:" in
+  *":$__rtk_prefix:"*) ;;
+  *) export PATH="$__rtk_prefix:$PATH" ;;
+esac
+<command>
 ```
 
 The overlay is not applied for the bare `rtk` PATH source, empty commands,
