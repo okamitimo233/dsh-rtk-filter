@@ -1,7 +1,11 @@
 {
   "name": "@rtk-ai/dsh-rtk-filter",
   "version": "0.50.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "description": "Transparently runs DeepSeek Harness bash commands through RTK, can bootstrap RTK with the official upstream installer, and exposes an RTK status/config section in DSH Settings.",
   "license": "Apache-2.0",
   "type": "module",
