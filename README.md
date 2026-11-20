@@ -126,7 +126,7 @@ this repository directory as `target`. The bundle patch inserts one row:
 ```yaml
 - insert:
     - id: rtk-filter
-      name: '@rtk-ai/dsh-rtk-filter'
+      name: '@okamitimo233/dsh-rtk-filter'
 ```
 
 Remove it with `plugin_manager` `action: remove_bundle`.
@@ -197,7 +197,7 @@ and set `config`:
 
 ```yaml
 - id: rtk-filter
-  name: '@rtk-ai/dsh-rtk-filter'
+  name: '@okamitimo233/dsh-rtk-filter'
   config:
     awareness: true                    # default: true
     rewriteTimeoutMs: 2000             # default: 2000

@@ -41,7 +41,7 @@ test('the client bundle registers the settings section and its dictionaries', ()
   }
   vm.runInNewContext(source, sandbox)
 
-  assert.equal(registration.id, '@rtk-ai/dsh-rtk-filter')
+  assert.equal(registration.id, '@okamitimo233/dsh-rtk-filter')
 
   const react = {
     Fragment: Symbol('fragment'),
@@ -59,7 +59,7 @@ test('the client bundle registers the settings section and its dictionaries', ()
   })
 
   assert.equal(styles.length, 1)
-  assert.equal(styles[0].dataset.plugin, '@rtk-ai/dsh-rtk-filter')
+  assert.equal(styles[0].dataset.plugin, '@okamitimo233/dsh-rtk-filter')
   assert.equal(plugin.inject.join(','), 'slots,locale')
   assert.equal(plugin.NS, 'settings.rtkFilter')
 

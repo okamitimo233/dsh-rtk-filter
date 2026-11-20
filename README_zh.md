@@ -114,7 +114,7 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
 ```yaml
 - insert:
     - id: rtk-filter
-      name: '@rtk-ai/dsh-rtk-filter'
+      name: '@okamitimo233/dsh-rtk-filter'
 ```
 
 用 `plugin_manager` 的 `action: remove_bundle` 卸载。
@@ -177,7 +177,7 @@ esac
 
 ```yaml
 - id: rtk-filter
-  name: '@rtk-ai/dsh-rtk-filter'
+  name: '@okamitimo233/dsh-rtk-filter'
   config:
     awareness: true                    # 默认: true
     rewriteTimeoutMs: 2000             # 默认: 2000
