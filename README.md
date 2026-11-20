@@ -112,8 +112,10 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
   download plus install operation is bounded to 30 seconds, so an offline or
   restricted network cannot stall Host startup for minutes.
 
-If installation fails, the plugin logs a warning and stays inert: bash and the
-prompt are unchanged.
+If automatic installation fails, the plugin logs a warning and stays inert:
+bash and the prompt are unchanged. You can run the upstream install command
+above manually, verify it with `~/.local/bin/rtk --version`, and then restart
+the Host so activation probes the new binary.
 
 ## Install
 
@@ -129,10 +131,29 @@ this repository directory as `target`. The bundle patch inserts one row:
 
 Remove it with `plugin_manager` `action: remove_bundle`.
 
+The row id is `rtk-filter` (loader entry `include:rtk-filter`), so it can also
+be disabled without removal:
+
+```text
+plugin_manager action=set_plugin target=include:rtk-filter enabled=false
+plugin_manager action=set_plugin target=include:rtk-filter enabled=true
+```
+
+After a plugin-code or config change, and after changing the RTK binary or the
+Host `PATH`/`RTK_INSTALL_DIR`, reload/restart the Host. RTK resolution reads the
+Host process environment, not variables exported inside a `bash` tool call. To
+inspect the merged profile row:
+
+```bash
+dsh --profile web --dump-config | grep -A5 "rtk-filter"
+```
+
+Avoid toggling the plugin while a step is running: that step's already-resolved
+tool set can briefly report `unknown tool "bash"` until the next step.
+
 After installing the bundle, no separate RTK setup is required. The plugin
 checks the Host `PATH` and the official install path during activation, and
-installs RTK with the official script only when both are missing. A changed
-binary or PATH requires a Host reload/restart.
+installs RTK with the official script only when both are missing.
 
 ## RTK binary resolution
 
@@ -145,7 +166,9 @@ binary or PATH requires a Host reload/restart.
 
 That is the whole acquisition rule. The plugin never keeps a private copy,
 never updates RTK in the background, and never garbage-collects global
-installations.
+installations. The lookup reads the Host process environment once at
+activation; exports made inside a `bash` tool call, including a modified
+`PATH` or `RTK_INSTALL_DIR`, do not affect the plugin.
 
 ### PATH overlay
 
@@ -192,8 +215,9 @@ the plugin and the same defaults apply.
 The Web GUI adds **Settings → RTK command filtering** with a compact top bar
 for its two views:
 
-- **Status** — runtime health and version, plus a compact dashboard for the
-  selected window (last 7 or 30 days): RTK calls, tokens saved, savings rate,
+- **Status** — runtime health, version, and the source badge (`PATH build` or
+  `Official install`), plus a compact dashboard for the selected window (last 7
+  or 30 days): RTK calls, tokens saved, savings rate,
   average saved per call, and a daily savings bar chart. The numbers are read
   from RTK's own local tracking database through `rtk gain --daily --format
   json`; they therefore summarize every command RTK recorded on this machine,
@@ -295,6 +319,9 @@ npm run smoke     # manual real-network install through the upstream script
 The unit suite never touches the network. The smoke command is for manual or
 workflow-dispatch verification and installs RTK into a temporary directory.
 
-## Handoff
+## Further reading
 
-See [HANDOFF.md](HANDOFF.md) for the current handoff state, operations quick reference, and next steps. [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module boundaries, constraints, and pitfalls; [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains why they exist.
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the current module
+  boundaries, constraints, and pitfalls.
+- [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md) explains the commit archaeology and
+  why the modules are shaped the way they are.

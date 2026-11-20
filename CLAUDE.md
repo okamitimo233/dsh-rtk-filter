@@ -29,7 +29,7 @@ node --test test/shadow.test.mjs
 node --test --test-name-pattern="PATH overlay" test/shadow.test.mjs
 ```
 
-安装/卸载到 DSH 使用 Host 的 `plugin_manager` 工具（`install_bundle` / `remove_bundle`，target 为本仓库绝对路径）；链接安装的代码变更需要 Host 重新加载后才在 live 会话生效。
+安装/卸载到 DSH 使用 Host 的 `plugin_manager` 工具（`install_bundle` / `remove_bundle`，target 为本仓库绝对路径）；启停使用同一工具的 `set_plugin`（`target=include:rtk-filter`）。链接安装的代码变更需要 Host 重新加载后才在 live 会话生效。
 
 ## 架构
 
@@ -109,5 +109,4 @@ model calls bash(command)
 
 - `docs/ARCHITECTURE.md` — 当前模块地图、依赖规则、数据流，是架构的权威说明。
 - `docs/COMMIT_REVIEW.md` — 18 个提交的补丁链考古与收敛动机，解释“为什么模块这样切”。
-- `HANDOFF.md` — 当前交接状态、运维速查与下一步（中文）。
-- `README.md` / `README_zh.md` — 用户文档：配置项、外部二进制解析、行为与限制。
+- `README.md` / `README_zh.md` — 用户文档：安装与运维、配置项、外部二进制解析、行为与限制。

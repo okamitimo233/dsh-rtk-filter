@@ -5,6 +5,8 @@
 > 审查基准：当前工作树 HEAD `2bf5660`（下文的 `file:line` 均以该工作树为准；历史提交用 `sha` 标注）
 > 方法：`git log --format="%h %ad %s" --date=short --stat`、`git show <sha> -- <paths>`、`git show <sha> --stat`，并逐一对照当前源码与 `HANDOFF.md` §5/§6/§7。
 > 性质：只读考古 + 证据整理；本文件是后续重构评审的输入，不是重构本身。
+>
+> 后续说明：本文引用的 `HANDOFF.md` 是审查时的临时交接文档，现已退役删除；其中长期有效的安装/运维、限制与架构说明已分别并入 README 和 `ARCHITECTURE.md`。下文保留当时的行号引用，仅作为审查记录。
 
 ## 0. 结论摘要
 

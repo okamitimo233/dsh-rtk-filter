@@ -136,8 +136,11 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
   Node built-ins only. `index.js` loads schemastery through an optional dynamic
   import and degrades to raw-config normalization. Do not add a static
   `@deepseek-ai/*` import to "restore" the Config form.
-- **The binary is resolved once at activation.** Installing or replacing RTK
-  requires a Host reload/restart; do not add polling or background updates.
+- **The binary is resolved once at activation from the Host process
+  environment.** Variables exported inside a `bash` tool call are not visible to
+  the plugin; update the Host `PATH`/`RTK_INSTALL_DIR` instead. Installing or
+  replacing RTK requires a Host reload/restart; do not add polling or
+  background updates.
 - **Install only when both standard locations are unusable.** Never run the
   installer just because a probed PATH binary is old or broken while the
   official install path has a working binary.

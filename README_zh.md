@@ -102,7 +102,9 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
   因此不要求该目录在 `PATH` 中。下载和执行安装脚本共用一个 30 秒总 deadline，
   离线或网络受限时不会让 Host 启动卡住数分钟。
 
-如果安装失败，插件会记录警告并保持惰性：bash 和 prompt 都不变。
+如果自动安装失败，插件会记录警告并保持惰性：bash 和 prompt 都不变。可以手动
+执行上面的官方安装命令，用 `~/.local/bin/rtk --version` 确认安装，然后重启 Host，
+让激活流程重新探测二进制。
 
 ## 安装
 
@@ -117,8 +119,27 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
 
 用 `plugin_manager` 的 `action: remove_bundle` 卸载。
 
+插件行 id 为 `rtk-filter`（Loader entry 为 `include:rtk-filter`），因此也可以
+不卸载而直接启停：
+
+```text
+plugin_manager action=set_plugin target=include:rtk-filter enabled=false
+plugin_manager action=set_plugin target=include:rtk-filter enabled=true
+```
+
+修改插件代码或配置、替换 RTK 二进制、或修改 Host 的 `PATH` / `RTK_INSTALL_DIR`
+后，需要重新加载/重启 Host。RTK 解析读取的是 Host 进程环境，不会继承某次
+`bash` 工具调用里 export 的变量。查看 profile 合并后的插件行：
+
+```bash
+dsh --profile web --dump-config | grep -A5 "rtk-filter"
+```
+
+不要在某个 step 运行期间启停插件：该 step 已解析的 tool set 可能短暂报
+`unknown tool "bash"`，下一步会恢复。
+
 安装 bundle 后不需要额外安装 RTK。插件在激活时检查 Host `PATH` 和官方安装位置，
-两者都不存在时才用官方脚本安装。替换二进制或修改 PATH 后需要重新加载/重启 Host。
+两者都不存在时才用官方脚本安装。
 
 ## RTK 二进制解析
 
@@ -129,6 +150,8 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
 3. 如果两者都不可用，运行 RTK 官方安装脚本，并 probe 安装后的绝对路径。
 
 这就是全部获取规则。插件不保留私有副本、不后台更新 RTK，也不回收全局安装。
+获取规则只在激活时读取一次 Host 进程环境；某次 `bash` 工具调用中对 `PATH` 或
+`RTK_INSTALL_DIR` 的修改不会影响插件。
 
 ### PATH 覆盖层
 
@@ -170,8 +193,9 @@ export PATH='<binary-dir>':"$PATH"; <command>
 
 Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏，里面有两部分：
 
-- **状态** — 展示运行状态与版本，以及所选时间窗口（近 7 天 / 近 30 天）的简洁面板：
-  RTK 调用次数、节省 Token、节省比例、平均每次节省，以及每日节省柱状图。数据通过
+- **状态** — 展示运行状态、版本和来源标识（`PATH 版本` 或 `官方安装`），以及所选
+  时间窗口（近 7 天 / 近 30 天）的简洁面板：RTK 调用次数、节省 Token、节省比例、
+  平均每次节省，以及每日节省柱状图。数据通过
   `rtk gain --daily --format json` 读取 RTK 自己的本地跟踪库，因此统计的是本机 RTK
   记录过的全部命令，而不只是当前浏览器会话。
 - **设置** — 预留给以后的可调选项。目前无需配置，插件参数仍通过上面的 profile 行管理。
@@ -252,8 +276,7 @@ npm run smoke     # 手动真实网络安装，走上游官方安装脚本
 单元测试不访问网络；smoke 用于手动或 workflow_dispatch 验证，会把 RTK 安装到
 临时目录。
 
-## Handoff
+## 延伸阅读
 
-当前交接状态、运维速查和下一步见 [HANDOFF.md](HANDOFF.md)。模块边界、约束与坑点见
-[ARCHITECTURE.md](docs/ARCHITECTURE.md)；重构动机与提交考古见
-[COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md)。
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md)：当前模块边界、约束与坑点。
+- [COMMIT_REVIEW.md](docs/COMMIT_REVIEW.md)：提交考古，以及模块为何这样切分。
