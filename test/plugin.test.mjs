@@ -86,28 +86,20 @@ function standardBash() {
 }
 
 const defaultInitial = {
-  binary: '/managed/rtk',
-  prefixDir: '/managed',
-  source: 'managed',
+  binary: '/home/plana/.local/bin/rtk',
+  prefixDir: '/home/plana/.local/bin',
+  source: 'explicit',
   version: { major: 1, minor: 2, patch: 0 },
   versionText: '1.2.0',
 }
 
 function makeManager(overrides = {}) {
-  const {
-    startThrows = false,
-    disposeThrows = false,
-    taskDisposeThrows = false,
-    ...rest
-  } = overrides
+  const { disposeThrows = false, ...rest } = overrides
   const state = {
     initial: defaultInitial,
     canWrap: true,
     reason: undefined,
-    ready: Promise.resolve(true),
-    started: 0,
     disposed: 0,
-    taskDisposed: 0,
     ...rest,
   }
   state.current = state.initial
@@ -122,18 +114,6 @@ function makeManager(overrides = {}) {
       return state.reason
     },
     current: () => state.current,
-    start() {
-      if (startThrows) throw new Error('start failed')
-      state.started += 1
-      return {
-        ready: state.ready,
-        dispose() {
-          if (taskDisposeThrows) throw new Error('task dispose failed')
-          state.taskDisposed += 1
-        },
-      }
-    },
-    async checkNow() {},
     dispose() {
       state.disposed += 1
       if (disposeThrows) throw new Error('manager dispose failed')
@@ -219,7 +199,6 @@ function makeCtx(agents = [makeAgent('agent-1')], options = {}) {
       shadowCalls.push(options)
       return { name: 'bash', async execute() { return 'shadow' } }
     },
-    smokeRewrite: async () => ({ ok: true }),
     toolAborted() {
       return Object.assign(new Error('tool call aborted'), { name: 'AbortError' })
     },
@@ -277,7 +256,7 @@ test('registers the awareness section and an agent-scoped bash shadow', async ()
   assert.equal(harness.settings[0].binary, 'rtk')
   assert.equal(harness.shadowCalls.length, 1)
   assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
-  assert.match(harness.infos.join('\n'), /filtering bash output through \/managed\/rtk/)
+  assert.match(harness.infos.join('\n'), /filtering bash output through \/home\/plana\/.local\/bin\/rtk/)
 })
 
 test('awareness: false keeps the tool shadow but removes the prompt text', async () => {
@@ -292,54 +271,13 @@ test('an unusable manager leaves bash and the prompt untouched', async () => {
   const { manager } = makeManager({
     initial: undefined,
     canWrap: false,
-    reason: 'RTK is not installed and autoInstall is disabled',
+    reason: 'RTK was not found on the Host PATH',
   })
-  await activateWith(harness, { autoInstall: false }, manager)
+  await activateWith(harness, {}, manager)
   assert.equal(harness.sections.length, 0)
   assert.equal(harness.ctx.agents.list()[0].registrations.length, 0)
-  assert.match(harness.warnings.join('\n'), /autoInstall is disabled/)
+  assert.match(harness.warnings.join('\n'), /RTK was not found on the Host PATH/)
   assert.match(harness.warnings.join('\n'), /will not be filtered/)
-})
-
-test('registers the shadow immediately and adds the prompt once installation is ready', async () => {
-  let resolveReady
-  const ready = new Promise((resolve) => {
-    resolveReady = resolve
-  })
-  const harness = makeCtx()
-  const { manager, state } = makeManager({ initial: undefined, canWrap: true, ready })
-  await activateWith(harness, {}, manager)
-
-  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
-  assert.equal(harness.sections.length, 0)
-  assert.match(harness.infos.join('\n'), /installing RTK in the background/)
-
-  state.current = {
-    binary: '/managed/rtk',
-    prefixDir: '/managed',
-    source: 'managed',
-    version: { major: 1, minor: 2, patch: 0 },
-    versionText: '1.2.0',
-  }
-  resolveReady(true)
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(harness.sections.length, 1)
-  assert.match(harness.infos.join('\n'), /filtering bash output through \/managed\/rtk/)
-})
-
-test('a failed background installation leaves the pass-through shadow and no prompt', async () => {
-  const harness = makeCtx()
-  const { manager } = makeManager({
-    initial: undefined,
-    canWrap: true,
-    ready: Promise.resolve(false),
-  })
-  await activateWith(harness, {}, manager)
-  await new Promise((resolve) => setImmediate(resolve))
-
-  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
-  assert.equal(harness.sections.length, 0)
-  assert.match(harness.warnings.join('\n'), /RTK is not ready/)
 })
 
 test('a manager creation failure does not fail activation', async () => {
@@ -397,7 +335,7 @@ test('tools/change does not register the shadow twice', async () => {
   assert.equal(agent.registrations.length, 1)
 })
 
-test('the plugin cleanup disposes the manager, its task, and every registration', async () => {
+test('the plugin cleanup disposes the manager and every registration', async () => {
   const harness = makeCtx()
   const { manager, state } = makeManager()
   await activateWith(harness, {}, manager)
@@ -408,7 +346,6 @@ test('the plugin cleanup disposes the manager, its task, and every registration'
   for (const effect of harness.effects) effect()
   assert.equal(agent.registrations.length, 0)
   assert.equal(state.disposed, 1)
-  assert.equal(state.taskDisposed, 1)
 })
 
 test('rewrite uses the manager current binary and prefix', async () => {
@@ -419,65 +356,44 @@ test('rewrite uses the manager current binary and prefix', async () => {
 
   const pass = await options.rewrite({ command: 'git status' })
   assert.equal(pass.kind, 'pass')
-  assert.equal(harness.rewriteCalls[0].binary, '/managed/rtk')
+  assert.equal(harness.rewriteCalls[0].binary, '/home/plana/.local/bin/rtk')
   assert.equal(harness.rewriteCalls[0].timeoutMs, 2000)
-  assert.equal(options.getPathPrefix(), '/managed')
+  assert.equal(options.getPathPrefix(), '/home/plana/.local/bin')
 
   state.current = {
-    binary: '/managed/rtk-2',
-    prefixDir: '/managed-2',
-    source: 'managed',
+    binary: '/opt/rtk',
+    prefixDir: '/opt',
+    source: 'explicit',
     version: { major: 1, minor: 3, patch: 0 },
     versionText: '1.3.0',
   }
   await options.rewrite({ command: 'git status' })
-  assert.equal(harness.rewriteCalls[1].binary, '/managed/rtk-2')
-  assert.equal(options.getPathPrefix(), '/managed-2')
-})
-
-test('rewrite passes through while no binary is ready', async () => {
-  const harness = makeCtx()
-  const { manager } = makeManager({ initial: undefined, canWrap: true })
-  await activateWith(harness, {}, manager)
-  const options = harness.shadowCalls[0]
-  assert.deepEqual(await options.rewrite({ command: 'git status' }), {
-    kind: 'pass',
-    reason: 'RTK is not ready yet',
-  })
-  assert.equal(harness.rewriteCalls.length, 0)
+  assert.equal(harness.rewriteCalls[1].binary, '/opt/rtk')
+  assert.equal(options.getPathPrefix(), '/opt')
 })
 
 test('config defaults reach the manager', async () => {
   const harness = makeCtx()
   await activateWith(harness, {}, makeManager().manager)
   const settings = harness.settings[0]
-  assert.equal(settings.autoInstall, true)
-  assert.equal(settings.autoUpdate, true)
-  assert.equal(settings.version, 'latest')
-  assert.equal(settings.edition, 'rtk')
-  assert.equal(settings.updateIntervalMs, 86_400_000)
-  assert.equal(settings.downloadTimeoutMs, 120_000)
+  assert.equal(settings.enabled, true)
+  assert.equal(settings.awareness, true)
+  assert.equal(settings.binary, 'rtk')
+  assert.equal(settings.rewriteTimeoutMs, 2000)
+  assert.equal(settings.logRewrites, false)
 })
 
 test('explicit config reaches the manager unchanged', async () => {
   const harness = makeCtx()
   await activateWith(harness, {
     binary: '/opt/rtk',
-    autoInstall: false,
-    autoUpdate: false,
-    version: '1.2.0',
-    edition: 'rtk-oss',
-    updateIntervalMs: 60_000,
-    downloadTimeoutMs: 5_000,
+    rewriteTimeoutMs: 5000,
+    logRewrites: true,
   }, makeManager().manager)
   const settings = harness.settings[0]
   assert.equal(settings.binary, '/opt/rtk')
-  assert.equal(settings.autoInstall, false)
-  assert.equal(settings.autoUpdate, false)
-  assert.equal(settings.version, '1.2.0')
-  assert.equal(settings.edition, 'rtk-oss')
-  assert.equal(settings.updateIntervalMs, 60_000)
-  assert.equal(settings.downloadTimeoutMs, 5_000)
+  assert.equal(settings.rewriteTimeoutMs, 5000)
+  assert.equal(settings.logRewrites, true)
 })
 
 test('malformed config values fall back to the documented defaults', async () => {
@@ -488,10 +404,6 @@ test('malformed config values fall back to the documented defaults', async () =>
     binary: '   ',
     rewriteTimeoutMs: 0,
     logRewrites: 'yes',
-    version: '',
-    edition: 'unknown-edition',
-    updateIntervalMs: 59_999,
-    downloadTimeoutMs: Number.NaN,
   }, makeManager().manager)
   const settings = harness.settings[0]
   assert.equal(settings.enabled, true)
@@ -499,10 +411,6 @@ test('malformed config values fall back to the documented defaults', async () =>
   assert.equal(settings.binary, 'rtk')
   assert.equal(settings.rewriteTimeoutMs, 2000)
   assert.equal(settings.logRewrites, false)
-  assert.equal(settings.version, 'latest')
-  assert.equal(settings.edition, 'rtk')
-  assert.equal(settings.updateIntervalMs, 86_400_000)
-  assert.equal(settings.downloadTimeoutMs, 120_000)
 })
 
 test('the optional Config schema is generated from the shared option table', async () => {
@@ -537,10 +445,6 @@ test('the optional Config schema is generated from the shared option table', asy
     if (option.kind === 'number') {
       assert.equal(builder.stepValue, 1)
       assert.equal(builder.minValue, option.min)
-    }
-    if (option.kind === 'enum') {
-      assert.equal(builder.kind, 'union')
-      assert.deepEqual(builder.members.map((member) => member.value), option.values)
     }
   }
   assert.deepEqual(Object.keys(normalizeConfig(undefined)), OPTIONS.map((option) => option.key))
@@ -593,7 +497,7 @@ test('registers a status route when the web server is present', async () => {
   }
   const harness = makeCtx([makeAgent('agent-1')], { services: { webServer } })
   harness.deps.readGainStatus = async ({ binary, days }) => {
-    assert.equal(binary, '/managed/rtk')
+    assert.equal(binary, '/home/plana/.local/bin/rtk')
     return aggregateGain({
       daily: [{
         date: '2026-11-10',
@@ -626,6 +530,7 @@ test('registers a status route when the web server is present', async () => {
   const payload = JSON.parse(res.body)
   assert.equal(payload.runtime.state, 'ready')
   assert.equal(payload.runtime.version, '1.2.0')
+  assert.equal(payload.runtime.source, 'explicit')
   assert.equal(payload.summary.calls, 4)
   assert.equal(payload.summary.savedTokens, 300)
 })
@@ -806,27 +711,6 @@ test('a throwing current lookup is treated as no binary', async () => {
   assert.equal(options.getPathPrefix(), undefined)
 })
 
-test('the status route reports an installing runtime', async () => {
-  const routes = []
-  const harness = makeCtx([makeAgent('agent-1')], {
-    services: { webServer: { register(route) { routes.push(route); return () => {} } } },
-  })
-  harness.deps.readGainStatus = async () => aggregateGain({ daily: [] })
-  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true }).manager)
-
-  const res = {
-    statusCode: 0,
-    headers: {},
-    setHeader(name, value) { this.headers[name.toLowerCase()] = value },
-    end(body) { this.body = body },
-  }
-  await routes[0].handler({ method: 'GET', url: '/rtk-filter/status', headers: {} }, res)
-  const payload = JSON.parse(res.body)
-  assert.equal(payload.runtime.state, 'installing')
-  assert.equal(payload.runtime.version, null)
-  assert.equal(payload.runtime.source, null)
-})
-
 test('the status route reports an unavailable runtime', async () => {
   const routes = []
   const harness = makeCtx([makeAgent('agent-1')], {
@@ -939,16 +823,6 @@ test('an already-installed agent is not registered twice', async () => {
   assert.equal(harness.shadowCalls.length, 1)
 })
 
-test('a non-Error manager start failure is reported', async () => {
-  const harness = makeCtx()
-  const { manager } = makeManager({ initial: undefined, canWrap: true })
-  manager.start = () => {
-    throw 'start boom'
-  }
-  await activateWith(harness, {}, manager)
-  assert.match(harness.warnings.join('\n'), /could not start the RTK manager: start boom/)
-})
-
 test('a shadow or registration failure leaves the agent unfiltered', async () => {
   const shadowFailure = makeCtx()
   shadowFailure.deps.createBashShadow = () => {
@@ -1059,7 +933,7 @@ test('cleanup tolerates throwing disposers and removes scoped notes', async () =
   const agent = makeAgent('agent-1', 'minimal')
   agent.failDispose = true
   const harness = makeCtx([agent], { bash: persistentBash() })
-  const { manager } = makeManager({ disposeThrows: true, taskDisposeThrows: true })
+  const { manager } = makeManager({ disposeThrows: true })
   await activateWith(harness, {}, manager)
 
   for (const effect of harness.effects) {
@@ -1068,62 +942,10 @@ test('cleanup tolerates throwing disposers and removes scoped notes', async () =
   assert.equal(agent.registrations.length, 1)
 })
 
-test('a manager start failure is reported without failing activation', async () => {
-  const harness = makeCtx()
-  const { manager } = makeManager({ initial: undefined, canWrap: true, startThrows: true })
-  await activateWith(harness, {}, manager)
-  assert.match(harness.warnings.join('\n'), /could not start the RTK manager: start failed/)
-  assert.equal(harness.ctx.agents.list()[0].registrations.length, 1)
-})
-
 test('an unavailable manager without a reason gets the default warning', async () => {
   const harness = makeCtx()
   await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: false, reason: undefined }).manager)
   assert.match(harness.warnings.join('\n'), /RTK is not available/)
-})
-
-test('a ready signal that arrives after disposal is ignored', async () => {
-  let resolveReady
-  const ready = new Promise((resolve) => { resolveReady = resolve })
-  const harness = makeCtx()
-  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true, ready }).manager)
-
-  for (const effect of harness.effects) effect()
-  resolveReady(true)
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(harness.sections.length, 0)
-})
-
-test('a ready rejection after disposal is ignored', async () => {
-  let rejectReady
-  const ready = new Promise((resolve, reject) => { rejectReady = reject })
-  const harness = makeCtx()
-  await activateWith(harness, {}, makeManager({ initial: undefined, canWrap: true, ready }).manager)
-
-  for (const effect of harness.effects) effect()
-  rejectReady(new Error('late failure'))
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.equal(harness.warnings.length, 0)
-})
-
-test('a rejected ready signal is reported without failing activation', async () => {
-  const harness = makeCtx()
-  await activateWith(harness, {}, makeManager({
-    initial: undefined,
-    canWrap: true,
-    ready: Promise.reject(new Error('setup exploded')),
-  }).manager)
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.match(harness.warnings.join('\n'), /RTK setup failed: setup exploded/)
-
-  const nonError = makeCtx()
-  await activateWith(nonError, {}, makeManager({
-    initial: undefined,
-    canWrap: true,
-    ready: Promise.reject('setup exploded'),
-  }).manager)
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.match(nonError.warnings.join('\n'), /RTK setup failed: setup exploded/)
 })
 
 test('a non-Error manager creation failure is reported', async () => {

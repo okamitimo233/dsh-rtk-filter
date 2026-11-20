@@ -62,8 +62,8 @@ function captureRoute(overrides = {}) {
         return () => {}
       },
     },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'managed' }),
-    getBinary: () => '/managed/rtk',
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getBinary: () => '/opt/rtk',
     readStatus: async (input) => {
       calls.push(input)
       return aggregateGain({ daily: [] }, { days: input.days, now: NOW })
@@ -150,7 +150,7 @@ test('aggregateGain coalesces duplicate same-day rows', () => {
 test('readGainStatus passes the binary through and folds the gain answer', async () => {
   let calledWith
   const stats = await readGainStatus({
-    binary: '/managed/rtk',
+    binary: '/opt/rtk',
     days: 7,
     now: NOW,
     run: async (input) => {
@@ -167,7 +167,7 @@ test('readGainStatus passes the binary through and folds the gain answer', async
     },
   })
 
-  assert.equal(calledWith.binary, '/managed/rtk')
+  assert.equal(calledWith.binary, '/opt/rtk')
   assert.equal(stats.range.days, 7)
   assert.equal(stats.summary.calls, 4)
   assert.equal(stats.summary.savedTokens, 300)
@@ -184,8 +184,8 @@ test('the status route answers JSON and marks HEAD as bodyless', async () => {
   const dispose = registerStatusRoute({
     ctx: { get: () => undefined },
     webServer,
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'managed' }),
-    getBinary: () => '/managed/rtk',
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
   })
@@ -215,7 +215,7 @@ test('the status route reports stats failure without losing runtime health', asy
   registerStatusRoute({
     ctx: { get: () => undefined },
     webServer: { register(route) { routes.push(route); return () => {} } },
-    getRuntime: () => ({ state: 'installing', version: null, source: null }),
+    getRuntime: () => ({ state: 'unavailable', version: null, source: null }),
     getBinary: () => undefined,
     readStatus: async () => { throw new Error('rtk gain failed') },
     now: () => NOW,
@@ -224,7 +224,7 @@ test('the status route reports stats failure without losing runtime health', asy
   const res = response()
   await routes[0].handler({ method: 'GET', url: '/rtk-filter/status', headers: {} }, res)
   const payload = JSON.parse(res.body)
-  assert.equal(payload.runtime.state, 'installing')
+  assert.equal(payload.runtime.state, 'unavailable')
   assert.equal(payload.summary.calls, 0)
   assert.equal(payload.statsError, 'stats-unavailable')
 })
@@ -234,8 +234,8 @@ test('the status route honors Connection rejection and method limits', async () 
   registerStatusRoute({
     ctx: { get: () => ({ requestRejection: () => 403 }) },
     webServer: { register(route) { routes.push(route); return () => {} } },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'managed' }),
-    getBinary: () => '/managed/rtk',
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
   })
@@ -250,8 +250,8 @@ test('the status route honors Connection rejection and method limits', async () 
   await registerStatusRoute({
     ctx,
     webServer: { register(registered) { route.handler = registered.handler; return () => {} } },
-    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'managed' }),
-    getBinary: () => '/managed/rtk',
+    getRuntime: () => ({ state: 'ready', version: '1.2.0', source: 'explicit' }),
+    getBinary: () => '/opt/rtk',
     readStatus: async () => aggregateGain({ daily: [] }, { days: 7, now: NOW }),
     now: () => NOW,
   })
@@ -322,7 +322,7 @@ test('buildStatusPayload shapes the wire body and normalizes statsError', () => 
   const stats = aggregateGain({
     daily: [{ date: '2026-11-10', commands: 2, input_tokens: 100, output_tokens: 25, saved_tokens: 75 }],
   }, { days: 2, now: NOW })
-  const runtime = { state: 'ready', version: '1.2.0', source: 'managed' }
+  const runtime = { state: 'ready', version: '1.2.0', source: 'explicit' }
   const payload = buildStatusPayload({ runtime, stats, generatedAt: NOW })
 
   assert.deepEqual(payload, {
@@ -342,7 +342,7 @@ test('buildStatusPayload shapes the wire body and normalizes statsError', () => 
 })
 
 test('readRuntimeSafe falls back when the provider throws', () => {
-  const ready = { state: 'ready', version: '1.2.0', source: 'managed' }
+  const ready = { state: 'ready', version: '1.2.0', source: 'explicit' }
   assert.deepEqual(readRuntimeSafe(() => ready), ready)
   assert.deepEqual(readRuntimeSafe(() => { throw new Error('runtime down') }), {
     state: 'unavailable',
@@ -352,22 +352,17 @@ test('readRuntimeSafe falls back when the provider throws', () => {
 })
 
 test('projectRuntime maps manager state to the page badge', () => {
-  assert.deepEqual(projectRuntime({ available: true, canWrap: true, version: '1.2.0', source: 'managed' }), {
+  assert.deepEqual(projectRuntime({ available: true, version: '1.2.0', source: 'explicit' }), {
     state: 'ready',
     version: '1.2.0',
-    source: 'managed',
+    source: 'explicit',
   })
   assert.deepEqual(projectRuntime({ available: true }), {
     state: 'ready',
     version: null,
     source: null,
   })
-  assert.deepEqual(projectRuntime({ available: false, canWrap: true, version: '1.2.0', source: 'managed' }), {
-    state: 'installing',
-    version: null,
-    source: null,
-  })
-  assert.deepEqual(projectRuntime({ available: false, canWrap: false }), {
+  assert.deepEqual(projectRuntime({ available: false, version: '1.2.0', source: 'explicit' }), {
     state: 'unavailable',
     version: null,
     source: null,
@@ -419,7 +414,7 @@ test('an aborted gain read rejects with AbortError', async () => {
 test('readGainStatus propagates a reader failure', async () => {
   await assert.rejects(
     readGainStatus({
-      binary: '/managed/rtk',
+      binary: '/opt/rtk',
       run: async () => { throw new Error('rtk gain failed') },
     }),
     /rtk gain failed/,
@@ -446,7 +441,7 @@ test('the status route clamps the days query parameter', async () => {
     const call = calls[calls.length - 1]
     assert.equal(call.days, expected, url)
     assert.equal(call.now, NOW, url)
-    assert.equal(call.binary, '/managed/rtk', url)
+    assert.equal(call.binary, '/opt/rtk', url)
   }
 })
 

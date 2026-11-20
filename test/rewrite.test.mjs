@@ -174,9 +174,9 @@ test('interpretRewrite fails open on an unexpected exit code', () => {
 
 test('interpretRewrite fails open when the binary is missing', () => {
   const error = Object.assign(new Error('spawn rtk ENOENT'), { code: 'ENOENT' })
-  assert.deepEqual(interpretRewrite({ binary: '/managed/rtk', error }), {
+  assert.deepEqual(interpretRewrite({ binary: '/opt/rtk', error }), {
     kind: 'pass',
-    reason: 'RTK binary "/managed/rtk" was not found',
+    reason: 'RTK binary "/opt/rtk" was not found',
   })
 })
 

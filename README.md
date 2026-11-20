@@ -10,14 +10,14 @@ changes no tool schema: it registers an agent-scoped `bash` tool that shadows
 the built-in one, rewrites each supported command to its `rtk` equivalent, and
 then delegates to the original bash implementation.
 
-The plugin also installs and updates its own RTK binary under
-`$DSH_HOME/cache/rtk-filter`. You do not need to install RTK globally, and a
-bundled or linked checkout never writes into a user `PATH` directory.
+The plugin expects an existing RTK executable: by default `rtk` from the Host
+`PATH`, or an explicit `binary` / `RTK_BIN`. It does not download, install,
+cache, or update RTK itself.
 
 Because execution delegates back to the built-in tool, sandboxing, approval,
 background jobs, timeouts, output rendering, spill files, and `[exit code: N]`
-markers behave exactly as before. Only the command that runs, its `PATH`
-overlay while a managed binary is active, and the output the model reads change.
+markers behave exactly as before. Only the command that runs, its possible
+`PATH` overlay, and the output the model reads change.
 
 The same plugin adds **Settings → RTK command filtering** to the Web GUI, with a
 compact status dashboard and a placeholder for future options.
@@ -28,7 +28,7 @@ compact status dashboard and a placeholder for future options.
 model calls bash("git status")
   -> agent-scoped bash shadow
   -> rtk rewrite "git status"        (0/3 = rewrite, 1 = pass, 2 = deny)
-  -> built-in bash runs "rtk git status", with the managed rtk on PATH
+  -> built-in bash runs "rtk git status"
   -> RTK-filtered output returns through the normal bash result path
 ```
 
@@ -58,8 +58,7 @@ flowchart TB
         Shell["preset-shell model<br/>lib/shell.js"]
         Shadow["agent-scoped bash shadow<br/>lib/shadow.js"]
         Rewrite["rewrite protocol<br/>lib/rewrite.js"]
-        Manager["managed RTK lifecycle<br/>lib/sidecar.js"]
-        Store["cache state · lock<br/>lib/store.js · lib/fsx.js"]
+        Manager["RTK source resolver<br/>lib/manager.js"]
         Prompt["system-prompt note<br/>lib/awareness.js"]
         Status["status route<br/>lib/status.js"]
     end
@@ -69,8 +68,7 @@ flowchart TB
         Web["Web server<br/>Connection trust fence"]
     end
 
-    RTK["rtk binary"]
-    Releases["GitHub Releases<br/>rtk-ai/rtk"]
+    RTK["existing rtk binary<br/>PATH or explicit"]
     Browser["Settings UI<br/>lib/client.js"]
 
     Model -->|"calls"| Shadow
@@ -84,29 +82,30 @@ flowchart TB
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"binary + PATH prefix"| Shadow
-    Manager -.->|"state · lock · GC"| Store
-    Manager -.->|"downloads / verifies"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
 
-Shared helpers: `lib/proc.js` (child process, abort contract, error text) is
-used by both the filter and the installer. The full module map, dependency
-rules, and single-sources-of-truth are in
-[ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Shared helpers: `lib/proc.js` owns child-process execution, the abort contract,
+and error text. The full module map, dependency rules, and
+single-sources-of-truth are in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Requirements
 
 - POSIX `bash` (the built-in `bash` tool). Windows `pwsh` is not covered.
-- No system `rtk` is required. The plugin downloads and verifies its own copy
-  (RTK >= 0.23.0, when `rtk rewrite` was introduced) on first use.
-- Network access to `github.com` on first activation unless `binary` or
-  `RTK_BIN` names an existing executable.
-- An explicit `binary` must be an executable named `rtk` (or a bare `rtk`
-  command resolved through `PATH`); rewritten commands invoke `rtk`.
+- RTK >= 0.23.0 (`rtk rewrite` was introduced there), available as `rtk` on
+  the Host `PATH`, through an explicit `binary`, or through `RTK_BIN`.
+- The official quick install is:
 
-If no binary can be obtained, the plugin logs a warning and stays inert: bash
-and the prompt are unchanged.
+```bash
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+```
+
+  It installs `~/.local/bin/rtk` by default; use `RTK_INSTALL_DIR` to override
+  the directory. Make sure that directory is on the Host `PATH`.
+
+If no usable binary can be resolved, the plugin logs a warning and stays inert:
+bash and the prompt are unchanged.
 
 ## Install
 
@@ -122,85 +121,34 @@ this repository directory as `target`. The bundle patch inserts one row:
 
 Remove it with `plugin_manager` `action: remove_bundle`.
 
-The first activation starts the RTK download in the background. Filtering
-begins automatically when the binary is ready; no restart and no shell command
-is needed.
+After installing the bundle, make sure the Host can resolve RTK. The plugin
+probes it once during activation; a changed binary or PATH requires a Host
+reload/restart.
 
-## RTK binary lifecycle
-
-### Where it lives
-
-```
-$DSH_HOME/cache/rtk-filter/                  # default ~/.dsh/cache/rtk-filter
-  versions/<edition>/<target>/<version>/rtk  # executable, mode 0755
-  state/<edition>__<target>.json             # installed version for this target
-  latest.json                                # cached latest stable tag
-  locks/                                     # cross-process install locks
-  tmp/                                       # staging; stale entries are cleaned
-```
-
-`$DSH_HOME` is read from the live profile (`profileContext.home`), then
-`$DSH_HOME`, then `~/.dsh`. The cache is user-owned and shared by DSH profiles;
-it is not added to the operating system `PATH` or to any shell profile.
+## RTK binary resolution
 
 ### Precedence
 
 1. `RTK_BIN` in the Host environment, or a non-default `binary` config:
-   use it as-is. No download and no update.
-2. The plugin-managed copy, which the plugin keeps updated.
-3. A system `rtk` on the Host `PATH`, used immediately as a temporary fallback
-   while the managed copy is downloaded, or permanently if the download fails.
-4. If nothing is available and `autoInstall` is enabled, download the latest
-   stable release in the background and start filtering when it is ready.
-5. Otherwise stay inert with a warning; bash and the prompt remain untouched.
+   use that explicit executable as-is.
+2. Otherwise, the bare `rtk` command from the Host `PATH`.
 
-A managed copy is preferred over `PATH` once it is ready, so `PATH`
-installations are never modified and updates stay under plugin control.
+There is no fallback from a broken explicit binary to `PATH`, and the plugin
+never downloads, installs, updates, or garbage-collects RTK binaries.
 
-### Install and update
+### PATH overlay
 
-- The latest stable tag is resolved from
-  `https://github.com/rtk-ai/rtk/releases/latest`; the GitHub API is only a
-  fallback.
-- The matching `rtk-<target>.tar.gz` (or `rtk-oss-<target>.tar.gz`) is
-  downloaded together with `checksums.txt`; the SHA-256 is verified before
-  extraction.
-- The archive is read with Node's `zlib` and a defensive tar parser: unsafe
-  paths, links, duplicates, truncation, and oversized entries are rejected.
-- The extracted `rtk` is run with `--version` (must match the requested tag and
-  be >= 0.23.0) and with a rewrite smoke test (`rtk rewrite` on `git status` or
-  `ls`; at least one must rewrite) before it is published.
-- Publishing is an atomic rename into a versioned directory, followed by an
-  atomic state write. An update never overwrites a running binary.
-- `autoUpdate` checks once per `updateIntervalMs` (default 24 h) and upgrades
-  the managed copy when the latest stable tag is newer. The previous version is
-  retained; older versions are garbage-collected.
-- `version` pins an exact tag (`1.2.0` or `v1.2.0`) and disables latest-version
-  lookups. Downgrades happen only when pinned explicitly.
-- `edition: rtk-oss` downloads the Apache-2.0-only build instead of the default
-  `rtk` build (Apache-2.0 CLI plus the BUSL-1.1 engine). The plugin downloads
-  the release from upstream; it does not redistribute it. The archive's
-  `LICENSE` and `LICENSE-ENGINE` files are kept beside the binary.
-
-The trust model is HTTPS plus upstream SHA-256 plus a local rewrite smoke
-test; upstream does not publish signatures. Set `autoInstall: false` to opt out
-of downloading.
-
-### Running with a managed binary
-
-The inherited bash tool resolves `rtk` from its own `PATH`, not from the
-plugin's configured binary. While a managed (or explicit absolute) binary is
-active, the shadow prepends its directory to `PATH` for every delegated
-command:
+The inherited bash tool resolves `rtk` from its own `PATH`. When the selected
+source is an absolute explicit binary, the shadow prepends its directory for
+each delegated command so `rtk`, `rtk bypass ...`, and `rtk` calls inside
+compound commands and scripts use the same executable:
 
 ```
-export PATH='<version-dir>':"$PATH"; <command>
+export PATH='<binary-dir>':"$PATH"; <command>
 ```
 
-That makes `rtk`, `rtk bypass ...`, and `rtk` calls inside compound commands and
-scripts work. The overlay is not applied when the chosen binary is the bare
-`rtk` from `PATH`, while no binary is ready, for empty commands, or when
-`RTK_DISABLED=1` is set.
+The overlay is not applied for the bare `rtk` PATH source, empty commands,
+disabled RTK, or when no binary is resolved.
 
 ## Configuration
 
@@ -211,26 +159,17 @@ and set `config`:
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    autoInstall: true          # default: true
-    autoUpdate: true           # default: true
-    version: latest            # default: latest, or a tag such as v1.2.0
-    edition: rtk               # default: rtk, or rtk-oss
-    awareness: true            # default: true
-    rewriteTimeoutMs: 2000     # default: 2000
-    logRewrites: false         # default: false
+    binary: /home/user/.local/bin/rtk  # default: rtk (Host PATH)
+    awareness: true                    # default: true
+    rewriteTimeoutMs: 2000             # default: 2000
+    logRewrites: false                 # default: false
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Turn the plugin off without removing it. |
 | `awareness` | `true` | Add the short system-prompt section about condensed output. |
-| `binary` | `rtk` | Explicit rtk executable. Setting it (or `RTK_BIN`) disables managed install/update; use an absolute path or a bare `rtk`. |
-| `autoInstall` | `true` | Download a plugin-owned binary when no managed copy exists. |
-| `autoUpdate` | `true` | Check GitHub and upgrade a managed copy. `PATH` and explicit binaries are never updated. |
-| `version` | `latest` | Pin an exact stable tag; disables latest-version lookups. |
-| `edition` | `rtk` | `rtk` or the Apache-2.0-only `rtk-oss`. |
-| `updateIntervalMs` | `86400000` | Minimum time between latest-tag checks. |
-| `downloadTimeoutMs` | `120000` | Timeout for one checksums or archive request. |
+| `binary` | `rtk` | RTK executable. The default uses Host `PATH`; an absolute path selects an explicit binary. `RTK_BIN` takes precedence. |
 | `rewriteTimeoutMs` | `2000` | Timeout for one `rtk rewrite` call; on timeout the original command runs. |
 | `logRewrites` | `false` | Log `[rtk] <original> -> <rewritten>` to the Host log. |
 
@@ -276,7 +215,7 @@ same way the Pi/OMP and Hermes delegates do, without setting
 Additional rules:
 
 - Commands that already start with `rtk` are not rewritten (no recursion); the
-  `PATH` overlay still applies while a managed binary is active.
+  `PATH` overlay still applies for an absolute explicit binary.
 - `RTK_DISABLED=1` in the Host environment skips plugin activation entirely.
   A per-command `RTK_DISABLED=1 <cmd>` prefix is skipped by `rtk rewrite`
   itself and runs unchanged.
@@ -303,7 +242,7 @@ Additional rules:
   does not hide this shadow. The stock profile and plan mode do not deny
   `bash`.
 - **Platform**: POSIX `bash` only; the Windows `pwsh` tool is not filtered.
-  Managed downloads support Linux and macOS on x64 and arm64.
+  RTK itself must provide a compatible build for the Host platform.
 - **Inherited definition**: the plugin captures the agent's `bash` definition
   when it installs for that agent. Once the shadow owns the `bash` name the
   agent's own lookup returns the shadow, so a later replacement is not visible
@@ -319,43 +258,22 @@ Additional rules:
   treats that definition as belonging to another plane and installs nothing:
   it filters less rather than changing the tool's schema and execution
   semantics. Unlisted presets are unaffected.
-- **Managed binary scope**: the plugin-owned RTK is on `PATH` only inside bash
-  calls it delegates, not in the user's terminal or other DSH processes. A
-  system `rtk` is not updated by the plugin; explicit `binary`/`RTK_BIN`
-  binaries are never managed.
-- **First activation**: with no usable binary and `autoInstall: true`, filtering
-  is unavailable until the background download finishes. If the network is
-  blocked, the plugin falls back to a system `rtk` or stays inert and logs a
-  warning.
-- **Trust**: downloads are verified against upstream SHA-256 checksums, not
-  signatures. Use `autoInstall: false` and an explicit `binary` where
-  third-party downloads are not allowed.
-- **Cache maintenance**: deleting `$DSH_HOME/cache/rtk-filter` forces a clean
-  reinstall on the next activation. The cache retains the current and one
-  previous version per edition/target.
+- **Binary ownership**: RTK is installed and updated outside this plugin. The
+  plugin only invokes the resolved executable; it has no cache to maintain.
+- **Activation**: the binary is probed once during activation. Install or
+  replace RTK first, then reload/restart the Host so the new executable is
+  picked up.
 
 ## Development
 
 Unit tests use only Node built-ins and generated fixtures (fake `rtk` scripts,
-tar archives, a fake `fetch`, a fake browser/module-loader sandbox, and a fake
-Cordis context). No network or real `rtk` is required, so CI runs them on every
-push and pull request:
+a fake browser/module-loader sandbox, and a fake Cordis context). No network or
+real `rtk` is required, so CI runs them on every push and pull request:
 
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # the same suite with 100% line/branch/function thresholds
 ```
-
-The release pipeline is exercised end to end against upstream with a temporary
-`DSH_HOME` (network required; no global installation is involved):
-
-```bash
-npm run smoke
-```
-
-`npm run smoke` is the script behind
-[.github/workflows/install-smoke.yml](.github/workflows/install-smoke.yml),
-which a maintainer can trigger from the Actions tab.
 
 ## Handoff
 

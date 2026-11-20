@@ -9,12 +9,12 @@
 agent 作用域的 `bash` 工具来遮蔽内置工具，把每条受支持的命令改写为对应的 `rtk` 形式，
 然后委托给原始 bash 实现执行。
 
-插件还会在 `$DSH_HOME/cache/rtk-filter` 下自行安装并更新 RTK 二进制。用户不需要全局安装
-RTK；bundle 或链接安装也不会写入用户的 `PATH` 目录。
+插件要求系统里已经有可用的 RTK：默认使用 Host `PATH` 上的 `rtk`，也可以通过显式
+`binary` 或 `RTK_BIN` 指定。插件本身不会下载、安装、缓存或更新 RTK。
 
 由于执行最终委托回内置工具，沙箱、审批、后台任务、超时、输出渲染、溢出文件以及
-`[exit code: N]` 标记的行为都与之前完全一致。发生变化的只有实际执行的命令、托管二进制
-生效时的 `PATH` 覆盖层，以及模型读到的输出。
+`[exit code: N]` 标记的行为都与之前完全一致。发生变化的只有实际执行的命令、可能的
+`PATH` 覆盖层，以及模型读到的输出。
 
 插件还会在 Web 界面中增加 **设置 → RTK 命令过滤**：包含一个简洁的状态面板，以及
 留给后续可调项的设置占位页。
@@ -25,7 +25,7 @@ RTK；bundle 或链接安装也不会写入用户的 `PATH` 目录。
 model calls bash("git status")
   -> agent-scoped bash shadow
   -> rtk rewrite "git status"        (0/3 = rewrite, 1 = pass, 2 = deny)
-  -> built-in bash runs "rtk git status", with the managed rtk on PATH
+  -> built-in bash runs "rtk git status"
   -> RTK-filtered output returns through the normal bash result path
 ```
 
@@ -53,8 +53,7 @@ flowchart TB
         Shell["preset-shell 模型<br/>lib/shell.js"]
         Shadow["agent 作用域 bash 影子<br/>lib/shadow.js"]
         Rewrite["rewrite 协议<br/>lib/rewrite.js"]
-        Manager["托管 RTK 生命周期<br/>lib/sidecar.js"]
-        Store["缓存状态 · 锁<br/>lib/store.js · lib/fsx.js"]
+        Manager["RTK 来源解析<br/>lib/manager.js"]
         Prompt["system prompt 提示<br/>lib/awareness.js"]
         Status["状态路由<br/>lib/status.js"]
     end
@@ -64,8 +63,7 @@ flowchart TB
         Web["Web 服务器<br/>Connection 信任检查"]
     end
 
-    RTK["rtk 二进制"]
-    Releases["GitHub Releases<br/>rtk-ai/rtk"]
+    RTK["已有 rtk 二进制<br/>PATH 或显式路径"]
     Browser["设置页<br/>lib/client.js"]
 
     Model -->|"调用"| Shadow
@@ -79,25 +77,28 @@ flowchart TB
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"二进制 + PATH 前缀"| Shadow
-    Manager -.->|"state · 锁 · GC"| Store
-    Manager -.->|"下载 / 校验"| Releases
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
 
-共享辅助模块：`lib/proc.js`（子进程、abort 契约、错误文本）同时被过滤路径与安装器使用。
+共享辅助模块：`lib/proc.js` 负责子进程执行、abort 契约与错误文本。
 完整的模块地图、依赖规则与“唯一来源”清单见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 环境要求
 
 - POSIX `bash`（即内置 `bash` 工具）。不覆盖 Windows 的 `pwsh`。
-- 不需要系统安装 `rtk`。插件会在首次使用时下载并校验自己的副本（RTK >= 0.23.0，
-  即引入 `rtk rewrite` 的版本）。
-- 首次激活需要访问 `github.com`，除非 `binary` 或 `RTK_BIN` 指向已有的可执行文件。
-- 显式 `binary` 必须是一个名为 `rtk` 的可执行文件（或通过 `PATH` 解析的裸 `rtk`
-  命令）；改写后的命令调用的是 `rtk`。
+- 需要 RTK >= 0.23.0（即引入 `rtk rewrite` 的版本），并满足以下任一来源：
+  Host `PATH` 上的 `rtk`、显式 `binary`、或 `RTK_BIN`。
+- 官方 quick install：
 
-如果无法获得任何二进制，插件会记录一条警告并保持惰性：bash 和 prompt 都不会被改动。
+```bash
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+```
+
+  默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。请确保该目录在
+  Host 的 `PATH` 中。
+
+如果无法解析到可用的二进制，插件会记录警告并保持惰性：bash 和 prompt 都不变。
 
 ## 安装
 
@@ -112,68 +113,29 @@ flowchart TB
 
 用 `plugin_manager` 的 `action: remove_bundle` 卸载。
 
-首次激活会在后台开始下载 RTK。二进制就绪后自动开始过滤；不需要重启，也不需要执行任何
-shell 命令。
+安装 bundle 后，确认 Host 能解析到 RTK。插件在激活时探测一次；替换二进制或修改 PATH 后
+需要重新加载/重启 Host。
 
-## RTK 二进制生命周期
-
-### 存放位置
-
-```
-$DSH_HOME/cache/rtk-filter/                  # 默认 ~/.dsh/cache/rtk-filter
-  versions/<edition>/<target>/<version>/rtk  # 可执行文件，权限 0755
-  state/<edition>__<target>.json             # 该 target 已安装的版本
-  latest.json                                # 缓存的最新稳定 tag
-  locks/                                     # 跨进程安装锁
-  tmp/                                       # 暂存区；过期条目会被清理
-```
-
-`$DSH_HOME` 依次读取当前 profile（`profileContext.home`）、`$DSH_HOME`、`~/.dsh`。
-缓存归用户所有，并由各 DSH profile 共享；它不会被加入操作系统 `PATH` 或任何 shell 配置。
+## RTK 二进制解析
 
 ### 优先级
 
-1. Host 环境中的 `RTK_BIN`，或非默认的 `binary` 配置：原样使用。不下载、不更新。
-2. 插件托管的副本，由插件负责更新。
-3. Host `PATH` 上的系统 `rtk`：在托管副本下载期间作为临时回退立即使用；如果下载失败，
-   则作为长期回退。
-4. 如果都没有且启用了 `autoInstall`，在后台下载最新稳定版，就绪后开始过滤。
-5. 否则保持惰性并记录警告；bash 和 prompt 不变。
+1. Host 环境中的 `RTK_BIN`，或非默认的 `binary` 配置：原样使用该显式可执行文件。
+2. 否则使用 Host `PATH` 上的裸 `rtk` 命令。
 
-托管副本一旦就绪就优先于 `PATH`，因此 `PATH` 安装永远不会被修改，更新由插件控制。
+显式二进制不可用时不会回退到 `PATH`；插件也不会下载、安装、更新或回收 RTK。
 
-### 安装与更新
+### PATH 覆盖层
 
-- 从 `https://github.com/rtk-ai/rtk/releases/latest` 解析最新稳定 tag；GitHub API 仅作为
-  回退。
-- 下载对应的 `rtk-<target>.tar.gz`（或 `rtk-oss-<target>.tar.gz`）以及 `checksums.txt`；
-  解压前校验 SHA-256。
-- 归档使用 Node 的 `zlib` 和防御性 tar 解析器读取：拒绝不安全路径、链接、重复条目、
-  截断和超大条目。
-- 解压出的 `rtk` 先运行 `--version`（必须匹配请求的 tag 且 >= 0.23.0），再运行
-  `rtk rewrite` 冒烟测试（`git status` 或 `ls`，至少一个必须产生改写），通过后才发布。
-- 发布方式是原子重命名到版本化目录，然后原子写 state。更新永远不会覆盖正在运行的二进制。
-- `autoUpdate` 每隔 `updateIntervalMs`（默认 24 小时）检查一次；当最新稳定 tag 更新时升级
-  托管副本。上一个版本会保留，更旧的版本会被 GC。
-- `version` 固定精确 tag（`1.2.0` 或 `v1.2.0`）并禁用最新版本查询。只有显式固定时才会降级。
-- `edition: rtk-oss` 下载仅 Apache-2.0 的构建，而不是默认的 `rtk`（Apache-2.0 CLI +
-  BUSL-1.1 engine）。插件从上游下载 release，不再分发它。归档中的 `LICENSE` 和
-  `LICENSE-ENGINE` 会与二进制一起保留。
-
-信任模型是 HTTPS + 上游 SHA-256 + 本地 rewrite 冒烟测试；上游不提供签名。设置
-`autoInstall: false` 可完全选择不下载。
-
-### 使用托管二进制运行
-
-继承的 bash 工具从自己的 `PATH` 解析 `rtk`，而不是从插件配置的二进制。当托管（或显式
-绝对路径）二进制生效时，影子会为每个委托命令把其所在目录前置到 `PATH`：
+继承的 bash 工具从自己的 `PATH` 解析 `rtk`。当选中的是绝对路径的显式二进制时，影子会为
+每个委托命令把其所在目录前置到 `PATH`，使 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的
+`rtk` 调用都使用同一个可执行文件：
 
 ```
-export PATH='<version-dir>':"$PATH"; <command>
+export PATH='<binary-dir>':"$PATH"; <command>
 ```
 
-这样 `rtk`、`rtk bypass ...` 以及复合命令和脚本中的 `rtk` 调用都能工作。当选中的是
-`PATH` 上的裸 `rtk`、尚无二进制就绪、命令为空，或设置了 `RTK_DISABLED=1` 时不应用该覆盖层。
+当来源是 `PATH` 上的裸 `rtk`、命令为空、RTK 被禁用，或没有解析到二进制时不应用覆盖层。
 
 ## 配置
 
@@ -183,26 +145,17 @@ export PATH='<version-dir>':"$PATH"; <command>
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    autoInstall: true          # default: true
-    autoUpdate: true           # default: true
-    version: latest            # default: latest, or a tag such as v1.2.0
-    edition: rtk               # default: rtk, or rtk-oss
-    awareness: true            # default: true
-    rewriteTimeoutMs: 2000     # default: 2000
-    logRewrites: false         # default: false
+    binary: /home/user/.local/bin/rtk  # 默认: rtk（Host PATH）
+    awareness: true                    # 默认: true
+    rewriteTimeoutMs: 2000             # 默认: 2000
+    logRewrites: false                 # 默认: false
 ```
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 在不移除插件的情况下将其关闭。 |
 | `awareness` | `true` | 添加关于压缩输出的简短 system prompt 章节。 |
-| `binary` | `rtk` | 显式 rtk 可执行文件。设置它（或 `RTK_BIN`）会禁用托管安装/更新；使用绝对路径或裸 `rtk`。 |
-| `autoInstall` | `true` | 没有托管副本时下载插件自有二进制。 |
-| `autoUpdate` | `true` | 检查 GitHub 并升级托管副本。`PATH` 和显式二进制永远不会被更新。 |
-| `version` | `latest` | 固定精确稳定 tag；禁用最新版本查询。 |
-| `edition` | `rtk` | `rtk` 或仅 Apache-2.0 的 `rtk-oss`。 |
-| `updateIntervalMs` | `86400000` | 两次最新 tag 检查之间的最短时间。 |
-| `downloadTimeoutMs` | `120000` | 单次 checksums 或归档请求的超时。 |
+| `binary` | `rtk` | RTK 可执行文件。默认使用 Host `PATH`；绝对路径表示显式二进制。`RTK_BIN` 优先。 |
 | `rewriteTimeoutMs` | `2000` | 单次 `rtk rewrite` 调用的超时；超时后执行原命令。 |
 | `logRewrites` | `false` | 向 Host 日志记录 `[rtk] <original> -> <rewritten>`。 |
 
@@ -239,7 +192,7 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 
 其他规则：
 
-- 已经以 `rtk` 开头的命令不会被改写（避免递归）；托管二进制生效时 `PATH` 覆盖层仍然应用。
+- 已经以 `rtk` 开头的命令不会被改写（避免递归）；显式绝对路径二进制生效时 `PATH` 覆盖层仍然应用。
 - Host 环境中的 `RTK_DISABLED=1` 会完全跳过插件激活。
   单条命令前缀 `RTK_DISABLED=1 <cmd>` 由 `rtk rewrite` 自身跳过，原样执行。
 - `rtk rewrite` 以会话的工作目录运行，因此项目本地的权限规则会像普通命令那样解析。
@@ -260,8 +213,8 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
 - **工具限制**：DSH 允许作用域注册在 `tools.restrict` 下仍然可见，因此某个 preset 为
   某个 agent 禁用了全局 `bash` 工具，也不会隐藏这个遮蔽工具。stock profile 和 plan mode
   都不禁用 `bash`。
-- **平台**：仅 POSIX `bash`；Windows 的 `pwsh` 工具不会被过滤。托管下载支持 Linux 和
-  macOS 的 x64 与 arm64。
+- **平台**：仅 POSIX `bash`；Windows 的 `pwsh` 工具不会被过滤。RTK 本身需要提供与 Host
+  平台匹配的构建。
 - **继承的定义**：插件在为其 agent 安装时捕获该 agent 的 `bash` 定义。影子一旦占住
   `bash` 名字，agent 自己的查找只会返回影子，因此之后的上游替换在 `tools/change` 里
   看不见；切换 preset 时插件会丢弃旧影子并重新捕获，再由形状守卫决定新 bash 能否被镜像。
@@ -272,35 +225,20 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
   声明了其它参数（例如标准 `dsh-tool-bash` 的 `description`/`workdir`），插件判定这份
   定义不属于该 preset，宁可不安装、不过滤，也不改变工具 schema 与执行语义。未登记的
   preset 不受影响。
-- **托管二进制的范围**：插件自有的 RTK 只出现在它委托的 bash 调用的 `PATH` 中，不在
-  用户终端或其他 DSH 进程里。系统 `rtk` 不会被插件更新；显式 `binary`/`RTK_BIN`
-  永远不会被托管。
-- **首次激活**：没有可用二进制且 `autoInstall: true` 时，在后台下载完成前无法过滤。
-  如果网络被阻断，插件会回退到系统 `rtk`，或保持惰性并记录警告。
-- **信任**：下载只通过上游 SHA-256 校验和验证，没有签名。不允许第三方下载的环境应设置
-  `autoInstall: false` 并使用显式 `binary`。
-- **缓存维护**：删除 `$DSH_HOME/cache/rtk-filter` 会在下次激活时强制重新安装。缓存对每个
-  edition/target 保留当前版本和一个上一版本。
+- **二进制归属**：RTK 的安装与更新由插件之外负责。插件只调用解析到的可执行文件，
+  没有需要维护的缓存。
+- **激活时机**：二进制在激活时探测一次。请先安装或替换 RTK，再重新加载/重启 Host，
+  以便重新解析。
 
 ## 开发
 
-单元测试只依赖 Node 内置模块和生成的测试夹具（fake `rtk` 脚本、tar 归档、fake `fetch`、
-fake 浏览器/模块加载器沙箱、fake Cordis Context），不需要网络或真实 `rtk`；CI 在每次
-push/PR 上运行：
+单元测试只依赖 Node 内置模块和测试夹具（fake `rtk` 脚本、fake 浏览器/模块加载器沙箱、
+fake Cordis Context），不需要网络或真实 `rtk`；CI 在每次 push/PR 上运行：
 
 ```bash
 npm test          # node --test test/*.test.mjs
 npm run coverage  # 同一套测试 + 行/分支/函数 100% 阈值
 ```
-
-用临时 `DSH_HOME` 针对上游完整跑一次安装链路（需要网络，不涉及全局安装）：
-
-```bash
-npm run smoke
-```
-
-`npm run smoke` 即 [.github/workflows/install-smoke.yml](.github/workflows/install-smoke.yml)
-中的脚本，维护者可从 Actions 页手动触发。
 
 ## Handoff
 
