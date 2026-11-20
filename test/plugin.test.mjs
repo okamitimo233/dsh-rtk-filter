@@ -379,6 +379,7 @@ test('config defaults reach the manager', async () => {
   assert.equal(settings.enabled, true)
   assert.equal(settings.awareness, true)
   assert.equal(settings.binary, 'rtk')
+  assert.equal(settings.autoInstall, true)
   assert.equal(settings.rewriteTimeoutMs, 2000)
   assert.equal(settings.logRewrites, false)
 })
@@ -387,11 +388,13 @@ test('explicit config reaches the manager unchanged', async () => {
   const harness = makeCtx()
   await activateWith(harness, {
     binary: '/opt/rtk',
+    autoInstall: false,
     rewriteTimeoutMs: 5000,
     logRewrites: true,
   }, makeManager().manager)
   const settings = harness.settings[0]
   assert.equal(settings.binary, '/opt/rtk')
+  assert.equal(settings.autoInstall, false)
   assert.equal(settings.rewriteTimeoutMs, 5000)
   assert.equal(settings.logRewrites, true)
 })
@@ -402,6 +405,7 @@ test('malformed config values fall back to the documented defaults', async () =>
     enabled: 0,
     awareness: 1,
     binary: '   ',
+    autoInstall: 0,
     rewriteTimeoutMs: 0,
     logRewrites: 'yes',
   }, makeManager().manager)
@@ -409,6 +413,7 @@ test('malformed config values fall back to the documented defaults', async () =>
   assert.equal(settings.enabled, true)
   assert.equal(settings.awareness, true)
   assert.equal(settings.binary, 'rtk')
+  assert.equal(settings.autoInstall, true)
   assert.equal(settings.rewriteTimeoutMs, 2000)
   assert.equal(settings.logRewrites, false)
 })

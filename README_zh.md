@@ -9,8 +9,9 @@
 agent 作用域的 `bash` 工具来遮蔽内置工具，把每条受支持的命令改写为对应的 `rtk` 形式，
 然后委托给原始 bash 实现执行。
 
-插件要求系统里已经有可用的 RTK：默认使用 Host `PATH` 上的 `rtk`，也可以通过显式
-`binary` 或 `RTK_BIN` 指定。插件本身不会下载、安装、缓存或更新 RTK。
+插件会优先使用已有的 RTK：`RTK_BIN` / 显式 `binary`，否则使用 Host `PATH` 上的 `rtk`。
+如果都不可用，插件可以运行一次 RTK 官方安装脚本，把普通全局二进制安装到
+`${RTK_INSTALL_DIR:-$HOME/.local/bin}`。插件不保留私有二进制缓存，也不会后台更新 RTK。
 
 由于执行最终委托回内置工具，沙箱、审批、后台任务、超时、输出渲染、溢出文件以及
 `[exit code: N]` 标记的行为都与之前完全一致。发生变化的只有实际执行的命令、可能的
@@ -54,6 +55,7 @@ flowchart TB
         Shadow["agent 作用域 bash 影子<br/>lib/shadow.js"]
         Rewrite["rewrite 协议<br/>lib/rewrite.js"]
         Manager["RTK 来源解析<br/>lib/manager.js"]
+        Installer["官方安装脚本<br/>lib/installer.js"]
         Prompt["system prompt 提示<br/>lib/awareness.js"]
         Status["状态路由<br/>lib/status.js"]
     end
@@ -77,6 +79,7 @@ flowchart TB
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"二进制 + PATH 前缀"| Shadow
+    Manager -.->|"仅无可用二进制时"| Installer
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
@@ -89,16 +92,17 @@ flowchart TB
 - POSIX `bash`（即内置 `bash` 工具）。不覆盖 Windows 的 `pwsh`。
 - 需要 RTK >= 0.23.0（即引入 `rtk rewrite` 的版本），并满足以下任一来源：
   Host `PATH` 上的 `rtk`、显式 `binary`、或 `RTK_BIN`。
-- 官方 quick install：
+- 如果以上都没有且启用了 `autoInstall`（默认），插件会运行官方 quick install：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 ```
 
-  默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。请确保该目录在
-  Host 的 `PATH` 中。
+  默认安装到 `~/.local/bin/rtk`，可用 `RTK_INSTALL_DIR` 覆盖目录。安装后插件使用
+  绝对路径调用，因此不要求该目录在 `PATH` 中。
 
-如果无法解析到可用的二进制，插件会记录警告并保持惰性：bash 和 prompt 都不变。
+如果安装失败、或关闭了 `autoInstall` 且没有可用二进制，插件会记录警告并保持惰性：
+bash 和 prompt 都不变。
 
 ## 安装
 
@@ -122,8 +126,11 @@ curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/instal
 
 1. Host 环境中的 `RTK_BIN`，或非默认的 `binary` 配置：原样使用该显式可执行文件。
 2. 否则使用 Host `PATH` 上的裸 `rtk` 命令。
+3. 如果 PATH 上也没有可用二进制且启用了 `autoInstall`，运行 RTK 官方安装脚本，
+   并 probe 安装后的绝对路径。
 
-显式二进制不可用时不会回退到 `PATH`；插件也不会下载、安装、更新或回收 RTK。
+显式二进制不可用时不会回退到 `PATH` 或安装器。插件不保留私有副本、不后台更新 RTK，
+也不回收全局安装。
 
 ### PATH 覆盖层
 
@@ -145,7 +152,8 @@ export PATH='<binary-dir>':"$PATH"; <command>
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    binary: /home/user/.local/bin/rtk  # 默认: rtk（Host PATH）
+    binary: rtk                        # 默认: rtk（Host PATH）
+    autoInstall: true                  # 默认: true
     awareness: true                    # 默认: true
     rewriteTimeoutMs: 2000             # 默认: 2000
     logRewrites: false                 # 默认: false
@@ -156,6 +164,7 @@ export PATH='<binary-dir>':"$PATH"; <command>
 | `enabled` | `true` | 在不移除插件的情况下将其关闭。 |
 | `awareness` | `true` | 添加关于压缩输出的简短 system prompt 章节。 |
 | `binary` | `rtk` | RTK 可执行文件。默认使用 Host `PATH`；绝对路径表示显式二进制。`RTK_BIN` 优先。 |
+| `autoInstall` | `true` | 当显式/PATH 都没有可用二进制时，运行 RTK 官方安装脚本。 |
 | `rewriteTimeoutMs` | `2000` | 单次 `rtk rewrite` 调用的超时；超时后执行原命令。 |
 | `logRewrites` | `false` | 向 Host 日志记录 `[rtk] <original> -> <rewritten>`。 |
 
@@ -225,15 +234,19 @@ Web 界面会在 **设置 → RTK 命令过滤** 中增加一个顶部切换栏�
   声明了其它参数（例如标准 `dsh-tool-bash` 的 `description`/`workdir`），插件判定这份
   定义不属于该 preset，宁可不安装、不过滤，也不改变工具 schema 与执行语义。未登记的
   preset 不受影响。
-- **二进制归属**：RTK 的安装与更新由插件之外负责。插件只调用解析到的可执行文件，
-  没有需要维护的缓存。
-- **激活时机**：二进制在激活时探测一次。请先安装或替换 RTK，再重新加载/重启 Host，
+- **二进制归属**：插件不保留私有 RTK 副本。需要引导安装时，它运行官方安装脚本，
+  把普通全局可执行文件写到 `${RTK_INSTALL_DIR:-$HOME/.local/bin}`。
+- **信任**：自动安装会通过 HTTPS 执行上游 `install.sh`，并依赖该脚本自身的 release
+  checksum 校验。不允许下载或执行该脚本的环境应关闭 `autoInstall`。
+- **不后台更新**：插件不会更新已有 RTK；只有显式/PATH 均无可用二进制时才自动安装。
+- **激活时机**：二进制在激活时探测一次。安装或替换 RTK 后，需要重新加载/重启 Host
   以便重新解析。
 
 ## 开发
 
-单元测试只依赖 Node 内置模块和测试夹具（fake `rtk` 脚本、fake 浏览器/模块加载器沙箱、
-fake Cordis Context），不需要网络或真实 `rtk`；CI 在每次 push/PR 上运行：
+单元测试只依赖 Node 内置模块和测试夹具（fake `rtk` 脚本、fake 安装脚本下载、fake
+浏览器/模块加载器沙箱、fake Cordis Context），不需要网络或真实 `rtk`；CI 在每次
+push/PR 上运行：
 
 ```bash
 npm test          # node --test test/*.test.mjs

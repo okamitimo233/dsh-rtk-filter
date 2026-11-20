@@ -12,6 +12,7 @@ import { buildConfigSchema } from './lib/config.js'
 import { abortError } from './lib/proc.js'
 import { probeRtk, rewriteCommand } from './lib/rewrite.js'
 import { createBashShadow } from './lib/shadow.js'
+import { installOfficialRtk } from './lib/installer.js'
 import { createRtkManager } from './lib/manager.js'
 
 /** Plugin name registered with the Loader. */
@@ -53,6 +54,7 @@ export function apply(ctx, config = {}) {
     rewriteCommand,
     createBashShadow,
     createRtkManager,
+    installOfficialRtk,
     toolAborted,
   })
 }

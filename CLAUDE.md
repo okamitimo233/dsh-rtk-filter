@@ -6,14 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DSH（DeepSeek Harness）插件：把模型调用的 `bash` 命令透明地改写成 `rtk ...`，让 RTK 压缩后的输出回到模型。插件**不新增工具、不改 schema**，而是为每个 agent 注册一个同名 `bash` 影子工具，捕获并委托给该 agent 原本继承的 `bash`，因此沙箱、审批、后台 job、超时、输出渲染和退出码全部复用 DSH 原实现。
 
-插件要求外部已有 RTK（默认 Host `PATH` 上的 `rtk`，或显式 `RTK_BIN` / `binary`）；插件自身不下载、安装、缓存或更新 RTK。Web 设置页提供状态仪表盘。
+RTK 来源优先级为 `RTK_BIN` / 显式 `binary` > Host `PATH` > 官方安装脚本（`autoInstall`）。插件不保留私有缓存，也不后台更新 RTK。Web 设置页提供状态仪表盘。
 
 ## 常用命令
 
 仓库零依赖、无构建步骤、无 lint 配置；除 `index.js` 对 schemastery 的一次可选动态导入外，只使用 Node 内置模块。
 
 ```bash
-# 全部单元测试（164 个，使用 fake rtk / fake Context）
+# 全部单元测试（179 个，使用 fake rtk / fake installer / fake Context）
 npm test
 
 # 覆盖率（行/分支/函数均为 100% 且带阈值，CI 同款；lib/client.js 由 VM 沙箱评估，不在插桩集合内）
@@ -56,14 +56,15 @@ model calls bash(command)
 | Shell 模型 | `lib/shell.js` + `lib/awareness.js` | preset 形状策略、幂等 PATH 覆盖层、提示文本组合与纯文本 |
 | 过滤 | `lib/shadow.js` | 同名 bash 定义、getter 镜像、执行委托 |
 | 过滤 | `lib/rewrite.js` + `lib/proc.js` | 退出码协议；子进程/abort/错误文本基座 |
-| 二进制 | `lib/manager.js` | 来源解析（`RTK_BIN` / 非默认 `binary` / Host `PATH`）与一次性 probe |
+| 二进制 | `lib/manager.js` | 来源解析（`RTK_BIN` / 非默认 `binary` / Host `PATH` / 官方安装）与一次性 probe |
+| 二进制 | `lib/installer.js` | 下载并执行 RTK 官方 `install.sh`，返回全局安装路径 |
 | 工具 | `lib/version.js` | 版本解析、比较与 `rtk rewrite` 最低版本门槛 |
 | 设置页 | `lib/status.js` / `lib/client.js` | `rtk gain` 聚合与同源 JSON 路由；手写浏览器 bundle |
 
 依赖规则：
 
 1. **只依赖 Node 内置模块。** 从 checkout 链接安装的 bundle 无法解析 DSH 自带的 `@deepseek-ai/*` 包；`index.js` 仅在顶层用 `await import('@deepseek-ai/schemastery')` 机会性加载 `Config`，失败时退化为原始 config 归一化。不要为“补回 schema”加静态 import。
-2. **`lib/` 内保持分层。** `proc.js`、`version.js`、`awareness.js` 是叶子；`activate.js` 不做进程/文件 IO，二进制 probe 全部归 `manager.js`；插件不做网络、缓存或安装。
+2. **`lib/` 内保持分层。** `proc.js`、`version.js`、`awareness.js` 是叶子；`activate.js` 不做进程/文件 IO，二进制 probe 归 `manager.js`，安装只允许委托给 `installer.js` 的官方脚本；插件不做私有缓存或后台更新。
 3. **`lib/client.js` 不是 ESM。** 它以 `window.__ModuleLoader__.load({ id, factory })` 形式被求值，不能使用 import；其中的字典 key、文案、CSS、DOM/SVG 都是用户可见 API。
 
 ### 激活与生命周期
@@ -76,9 +77,9 @@ model calls bash(command)
 
 ### 外部二进制
 
-来源优先级：`RTK_BIN` / 非默认 `binary`（原样使用）> Host `PATH` 上的 `rtk`。显式二进制 probe 失败时直接保持惰性，不回退到 `PATH`。
+来源优先级：`RTK_BIN` / 非默认 `binary`（原样使用）> Host `PATH` 上的 `rtk` > 官方安装脚本（仅当 `autoInstall` 且前两者都不可用）。显式二进制 probe 失败时直接保持惰性，不回退到 `PATH` 或安装器。
 
-插件不下载、不安装、不缓存、不更新 RTK；激活时只 probe 一次 `--version` 并检查 >= 0.23.0。安装或替换 RTK 后需要重新加载/重启 Host。绝对路径显式二进制生效时，影子在每条委托命令前加幂等 PATH 覆盖层（目录存 `__rtk_prefix`，用 `case ":$PATH:"` 判重）：`lib/shell.js` 的 `withRtkPath` 是唯一实现；裸 `rtk` 来源不覆盖。
+自动安装时，`lib/installer.js` 通过 HTTPS 拉取 RTK 官方 `install.sh`，在私有临时目录执行，安装到 `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk`，随后 `manager.js` probe 该绝对路径。插件不保留私有缓存、不做后台更新、不回收全局安装。安装或替换 RTK 后需要重新加载/重启 Host。绝对路径显式/安装二进制生效时，影子在每条委托命令前加幂等 PATH 覆盖层（目录存 `__rtk_prefix`，用 `case ":$PATH:"` 判重）：`lib/shell.js` 的 `withRtkPath` 是唯一实现；裸 `rtk` 来源不覆盖。
 
 ### 设置页
 
@@ -92,7 +93,7 @@ model calls bash(command)
 - **`RTK_DISABLED=1`** 在 Host 环境时跳过整个插件激活；逐命令前缀由 `rtk rewrite` 自身跳过。
 - **改写结果不会出现在 session log 里**：`tool/call` 记录模型写的原始命令；只有 `logRewrites: true` 才在 Host log 留下改写对。
 - **PATH 覆盖层必须幂等**：minimal preset 的 shell 跨调用保留环境，无条件 prepend 会让 `PATH` 每次多一份目录。
-- **测试不得依赖网络或真实 `rtk`**；用 `test/helpers.mjs` 的 fake rtk 脚本、fake browser/module-loader sandbox 和 fake Cordis Context。
+- **测试不得依赖网络或真实 `rtk`**；用 `test/*.test.mjs` 内的 fake rtk / manager、fake installer 下载、fake browser/module-loader sandbox 和 fake Cordis Context。
 
 ## 扩展指引
 

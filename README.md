@@ -10,9 +10,11 @@ changes no tool schema: it registers an agent-scoped `bash` tool that shadows
 the built-in one, rewrites each supported command to its `rtk` equivalent, and
 then delegates to the original bash implementation.
 
-The plugin expects an existing RTK executable: by default `rtk` from the Host
-`PATH`, or an explicit `binary` / `RTK_BIN`. It does not download, install,
-cache, or update RTK itself.
+The plugin uses an existing RTK executable when one is available: `RTK_BIN`
+or an explicit `binary`, otherwise `rtk` from the Host `PATH`. If none is
+usable, it can run the official upstream install script once, which installs a
+normal global binary under `${RTK_INSTALL_DIR:-$HOME/.local/bin}`. The plugin
+keeps no private binary cache and does not update RTK in the background.
 
 Because execution delegates back to the built-in tool, sandboxing, approval,
 background jobs, timeouts, output rendering, spill files, and `[exit code: N]`
@@ -59,6 +61,7 @@ flowchart TB
         Shadow["agent-scoped bash shadow<br/>lib/shadow.js"]
         Rewrite["rewrite protocol<br/>lib/rewrite.js"]
         Manager["RTK source resolver<br/>lib/manager.js"]
+        Installer["official install script<br/>lib/installer.js"]
         Prompt["system-prompt note<br/>lib/awareness.js"]
         Status["status route<br/>lib/status.js"]
     end
@@ -82,6 +85,7 @@ flowchart TB
     Activate -.-> Manager
     Activate -.-> Status
     Manager -.->|"binary + PATH prefix"| Shadow
+    Manager -.->|"only when no binary exists"| Installer
 
     Browser -->|"GET /rtk-filter/status"| Web --> Status -->|"rtk gain"| RTK
 ```
@@ -95,17 +99,19 @@ single-sources-of-truth are in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - POSIX `bash` (the built-in `bash` tool). Windows `pwsh` is not covered.
 - RTK >= 0.23.0 (`rtk rewrite` was introduced there), available as `rtk` on
   the Host `PATH`, through an explicit `binary`, or through `RTK_BIN`.
-- The official quick install is:
+- When none of those exists and `autoInstall` is enabled (default), the plugin
+  runs the official quick install itself:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
 ```
 
   It installs `~/.local/bin/rtk` by default; use `RTK_INSTALL_DIR` to override
-  the directory. Make sure that directory is on the Host `PATH`.
+  the directory. After installation the plugin invokes the absolute path, so
+  adding that directory to `PATH` is convenient but not required.
 
-If no usable binary can be resolved, the plugin logs a warning and stays inert:
-bash and the prompt are unchanged.
+If installation fails, or `autoInstall` is disabled and no binary exists, the
+plugin logs a warning and stays inert: bash and the prompt are unchanged.
 
 ## Install
 
@@ -132,9 +138,12 @@ reload/restart.
 1. `RTK_BIN` in the Host environment, or a non-default `binary` config:
    use that explicit executable as-is.
 2. Otherwise, the bare `rtk` command from the Host `PATH`.
+3. If no usable PATH binary exists and `autoInstall` is enabled, run the
+   official upstream install script and probe the installed absolute path.
 
-There is no fallback from a broken explicit binary to `PATH`, and the plugin
-never downloads, installs, updates, or garbage-collects RTK binaries.
+There is no fallback from a broken explicit binary to `PATH` or to the
+installer. The plugin never keeps a private copy, never updates RTK in the
+background, and never garbage-collects global installations.
 
 ### PATH overlay
 
@@ -159,7 +168,8 @@ and set `config`:
 - id: rtk-filter
   name: '@rtk-ai/dsh-rtk-filter'
   config:
-    binary: /home/user/.local/bin/rtk  # default: rtk (Host PATH)
+    binary: rtk                        # default: rtk (Host PATH)
+    autoInstall: true                  # default: true
     awareness: true                    # default: true
     rewriteTimeoutMs: 2000             # default: 2000
     logRewrites: false                 # default: false
@@ -170,6 +180,7 @@ and set `config`:
 | `enabled` | `true` | Turn the plugin off without removing it. |
 | `awareness` | `true` | Add the short system-prompt section about condensed output. |
 | `binary` | `rtk` | RTK executable. The default uses Host `PATH`; an absolute path selects an explicit binary. `RTK_BIN` takes precedence. |
+| `autoInstall` | `true` | When no explicit or PATH binary is usable, run the official upstream install script. |
 | `rewriteTimeoutMs` | `2000` | Timeout for one `rtk rewrite` call; on timeout the original command runs. |
 | `logRewrites` | `false` | Log `[rtk] <original> -> <rewritten>` to the Host log. |
 
@@ -258,17 +269,24 @@ Additional rules:
   treats that definition as belonging to another plane and installs nothing:
   it filters less rather than changing the tool's schema and execution
   semantics. Unlisted presets are unaffected.
-- **Binary ownership**: RTK is installed and updated outside this plugin. The
-  plugin only invokes the resolved executable; it has no cache to maintain.
+- **Binary ownership**: the plugin keeps no private RTK copy. If it bootstraps
+  RTK, it runs the official installer, which writes a normal global executable
+  under `${RTK_INSTALL_DIR:-$HOME/.local/bin}`.
+- **Trust**: automatic installation executes the upstream `install.sh` over
+  HTTPS and relies on that script's own release checksum verification. Disable
+  `autoInstall` in environments where downloading or executing that script is
+  not allowed.
+- **No background updates**: an existing RTK is never updated by the plugin.
+  Auto-install runs only when no usable explicit or PATH binary exists.
 - **Activation**: the binary is probed once during activation. Install or
-  replace RTK first, then reload/restart the Host so the new executable is
-  picked up.
+  replace RTK, then reload/restart the Host so the new executable is picked up.
 
 ## Development
 
 Unit tests use only Node built-ins and generated fixtures (fake `rtk` scripts,
-a fake browser/module-loader sandbox, and a fake Cordis context). No network or
-real `rtk` is required, so CI runs them on every push and pull request:
+a fake install-script download, a fake browser/module-loader sandbox, and a
+fake Cordis context). No network or real `rtk` is required, so CI runs them on
+every push and pull request:
 
 ```bash
 npm test          # node --test test/*.test.mjs

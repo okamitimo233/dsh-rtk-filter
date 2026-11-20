@@ -6,9 +6,11 @@ delegates the rewritten command to the real `bash`. Sandboxing, approvals,
 background jobs, timeouts, output spill, and rendering stay the built-in
 implementation's job.
 
-The plugin does not download, install, cache, or update RTK. It resolves one
-external executable at activation time and leaves binary lifecycle management
-to the user's normal RTK installation.
+The plugin resolves one external executable at activation time. If none is
+available and `autoInstall` is enabled, it runs RTK's official upstream install
+script once, which writes a normal global binary under
+`${RTK_INSTALL_DIR:-$HOME/.local/bin}`. The plugin keeps no private cache and
+does not update RTK in the background.
 
 The commit history behind this design is in [COMMIT_REVIEW.md](COMMIT_REVIEW.md).
 This file describes the current module boundaries and the rules that keep them
@@ -35,7 +37,8 @@ semantics:
 | Entry | `index.js` | `name`/`inject`/`Config`/`apply`; wires the runtime dependencies. |
 | Entry | `lib/config.js` | Option defaults, normalization, and the schemastery descriptor. The only place a default literal lives. |
 | Orchestration | `lib/activate.js` | Activation lifecycle: manager creation, lazy shadow registration and re-capture, prompt timing, status route, cleanup. |
-| Binary | `lib/manager.js` | Resolves `RTK_BIN` / non-default `binary` / Host `PATH` once, probes the executable, and exposes the manager interface used by activation. |
+| Binary | `lib/manager.js` | Resolves `RTK_BIN` / non-default `binary` / Host `PATH`, optionally invokes the official installer, probes the executable, and exposes the manager interface used by activation. |
+| Binary | `lib/installer.js` | Downloads the official `install.sh`, runs it from a private temp directory, and returns the installed `${RTK_INSTALL_DIR:-$HOME/.local/bin}/rtk` path. |
 | Shell model | `lib/shell.js` | Derives a shell profile from the captured bash definition; preset policy; idempotent PATH overlay; awareness text composition. |
 | Shell model | `lib/awareness.js` | Prompt text as plain data. |
 | Filter | `lib/shadow.js` | The same-named `bash` definition: getter mirroring and delegation. |
@@ -57,8 +60,10 @@ semantics:
 4. **`client.js` keeps its loader contract.** It is evaluated as
    `window.__ModuleLoader__.load({ id, factory })` and cannot use ES imports;
    its dictionary keys, wording, CSS, and DOM/SVG output are user-visible API.
-5. **`manager.js` never installs anything.** It may only probe an existing
-   executable; network, cache, archive, and update logic do not belong here.
+5. **Installation is delegated to the official script.** `manager.js` may
+   invoke `installer.js`; it must not implement a private download/cache/update
+   pipeline. `installer.js` writes no long-lived state and installs only through
+   the upstream script.
 
 ## Data flow
 
@@ -84,6 +89,7 @@ apply
   -> createRtkManager                      lib/manager.js
        RTK_BIN / non-default binary -> explicit
        otherwise                    -> rtk from Host PATH
+       otherwise, autoInstall       -> official install.sh -> global binary
        probe --version once and require >= 0.23.0
   -> register a lazy shadow per agent      lib/activate.js + lib/shadow.js
        capture the agent's own bash, derive its shell profile
@@ -110,6 +116,7 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
 |---|---|
 | Option defaults and clamps | `lib/config.js` (`OPTIONS`) |
 | Binary source precedence | `lib/manager.js` (`resolveSource`) |
+| Official install-script URL and execution | `lib/installer.js` |
 | Preset shell shape policy | `lib/shell.js` (`PRESET_SHELLS`) |
 | PATH overlay command | `lib/shell.js` (`withRtkPath`) |
 | Prompt text | `lib/awareness.js`; composition in `lib/shell.js` |
@@ -126,10 +133,13 @@ chains reviewed in [COMMIT_REVIEW.md](COMMIT_REVIEW.md) started.
   import and degrades to raw-config normalization. Do not add a static
   `@deepseek-ai/*` import to "restore" the Config form.
 - **The binary is resolved once at activation.** Installing or replacing RTK
-  requires a Host reload/restart; do not add polling or background installers.
-- **There is no fallback from a broken explicit binary.** `RTK_BIN` and a
-  non-default `binary` are explicit choices. If they cannot be probed, the
-  plugin stays inert and reports the reason instead of silently choosing PATH.
+  requires a Host reload/restart; do not add polling or background updates.
+- **Auto-install is only for a missing PATH binary.** Do not run the installer
+  when an explicit `RTK_BIN` / `binary` fails: an explicit choice must stay
+  explicit, and the plugin should report the probe failure instead.
+- **The official installer owns release verification.** `installer.js` downloads
+  `install.sh` over HTTPS and runs it; it must not grow its own archive parser,
+  state directory, lock, or update scheduler.
 - **Capture the agent's bash before registering the shadow.** In the Web
   surface the built-in tool lives in the agent-preset realm, so unscoped
   `ctx.tools.get('bash')` returns `undefined`; after registration the same
